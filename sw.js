@@ -1,5 +1,5 @@
 /* BRIMA HC PWA shell cache. Never cache patient data, Firestore API responses or auth requests. */
-const CACHE_NAME = 'brima-shell-v0317-firestore-format-schema-20261106';
+const CACHE_NAME = 'brima-shell-v0318-document-actions-catalog-20261111';
 const SHELL_FILES = [
   './', './index.html', './css/styles.css', './js/firebase-config.js', './js/app.js',
   './manifest.webmanifest', './favicon.ico', './favicon.svg', './icons/brima-192.png', './icons/brima-512.png', './icons/apple-touch-icon.png'
