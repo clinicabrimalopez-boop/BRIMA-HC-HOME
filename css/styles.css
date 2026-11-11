@@ -310,3 +310,76 @@ body[data-brima-specialty="psicologia"] .sidebar{background:linear-gradient(180d
 .format-assignment-item small{font-size:9px;color:#8593a1;overflow-wrap:anywhere}
 .format-assignment-item:has(input:checked){border-color:color-mix(in srgb,var(--role-color,#2463a6) 40%,white);background:color-mix(in srgb,var(--role-color,#2463a6) 5%,white)}
 @media(max-width:700px){.format-assignment-grid{grid-template-columns:1fr}}
+
+/* BRIMA: catálogo de documentos reutilizables y selección compacta de campos */
+.document-action-catalog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:9px;margin-top:14px}
+.document-action-catalog-item{display:flex;flex-direction:column;gap:4px;padding:11px 12px;border:1px solid #e5ebf0;border-radius:10px;background:#fbfdff;min-width:0}
+.document-action-catalog-item strong{font-size:12px;color:#344b60}
+.document-action-catalog-item span{font-size:11px;color:#536b80}
+.document-action-catalog-item small,.document-catalog-row small{font-size:10px;color:#8795a4;line-height:1.45}
+.document-catalog-list{display:flex;flex-direction:column;gap:8px}
+.document-catalog-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px;border:1px solid #e5ebf0;border-radius:10px;background:#fff}
+.document-catalog-row>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0}
+.document-catalog-row strong{font-size:12px;color:#344b60}
+.document-catalog-row p{margin:0;font-size:10px;color:#8492a1}
+.format-document-actions-list{display:flex;flex-direction:column;gap:12px}
+.format-document-action-card{border:1px solid #dfe8ef;border-radius:12px;padding:13px;background:#fbfdff;display:flex;flex-direction:column;gap:11px}
+.format-document-action-enable{display:flex;align-items:center;gap:9px;cursor:pointer;min-width:0}
+.format-document-action-enable>span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.format-document-action-enable strong{font-size:12px;color:#334b60}
+.format-document-action-enable small{font-size:10px;color:#8492a1}
+.format-document-action-options{gap:9px}
+.document-action-field-select{border-top:1px solid #e9eef2;padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.document-action-field-select>strong{font-size:11px;color:#52667a}
+.document-action-field-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 12px;max-height:210px;overflow:auto;padding:8px;border:1px solid #e8edf1;border-radius:9px;background:#fff}
+.document-action-field-option{display:flex!important;align-items:center!important;flex-direction:row!important;gap:8px!important;min-width:0;padding:4px 3px;color:#596c80!important;font-size:10px!important;font-weight:600!important;line-height:1.35;cursor:pointer}
+.document-action-field-option span{min-width:0;overflow-wrap:anywhere}
+.document-action-field-option input[type="checkbox"],.format-document-action-enable input[type="checkbox"]{appearance:auto!important;-webkit-appearance:checkbox!important;display:inline-block!important;flex:0 0 15px!important;width:15px!important;min-width:15px!important;max-width:15px!important;height:15px!important;min-height:15px!important;margin:0!important;padding:0!important;border:initial!important;box-shadow:none!important;accent-color:#2463a6;cursor:pointer}
+.document-action-include-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:4px 12px;padding-top:3px}
+.document-action-include-options .document-action-field-option{font-size:10px!important}
+@media(max-width:680px){.document-catalog-row{align-items:flex-start;flex-direction:column}.document-catalog-row .actions{width:100%}.document-action-field-grid{grid-template-columns:1fr}.format-document-action-options{grid-template-columns:1fr}}
+/* Compactar también las casillas de destinos del editor de campos existente. */
+.template-builder-row .check-label{display:flex!important;align-items:center!important;flex-direction:row!important;gap:9px!important;font-size:10px!important;line-height:1.4;padding:3px 0}
+.template-builder-row .check-label input[type="checkbox"],.format-action-settings input[type="checkbox"]{appearance:auto!important;-webkit-appearance:checkbox!important;display:inline-block!important;flex:0 0 15px!important;width:15px!important;min-width:15px!important;max-width:15px!important;height:15px!important;min-height:15px!important;margin:0!important;padding:0!important;accent-color:#2463a6;box-shadow:none!important}
+.template-builder-row .form-field>strong{display:block;font-size:11px;color:#52667a;margin-bottom:6px}
+
+/* BRIMA 0.3.18 — documentos reutilizables y controles compactos */
+.document-action-catalog-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}
+.document-action-catalog-item{display:flex;flex-direction:column;gap:5px;padding:12px;border:1px solid #e3ebf1;border-radius:11px;background:#fbfdff;min-width:0}
+.document-action-catalog-item strong{font-size:12px;color:var(--ink,#26384b)}
+.document-action-catalog-item span{font-size:11px;color:var(--blue,#2463a6);font-weight:700}
+.document-action-catalog-item small{font-size:10px;color:var(--muted,#7b8794);line-height:1.45}
+.document-catalog-list{display:flex;flex-direction:column;gap:8px}
+.document-catalog-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid #e3eaf0;border-radius:11px;background:#fff}
+.document-catalog-row>div:first-child{min-width:0}
+.document-catalog-row strong,.document-catalog-row small{display:block}
+.document-catalog-row strong{font-size:12px;color:var(--ink,#26384b)}
+.document-catalog-row small,.document-catalog-row p{font-size:10px;color:var(--muted,#7b8794);margin:4px 0 0;line-height:1.4}
+.format-document-actions-list{display:grid;grid-template-columns:1fr;gap:12px}
+.format-document-action-card{min-width:0;padding:13px;border:1px solid #dfe7ee;border-radius:12px;background:#fbfdff}
+.format-document-action-enable{display:flex!important;align-items:flex-start!important;gap:9px!important;cursor:pointer;font-size:12px!important;color:#34495e!important}
+.format-document-action-enable>span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.format-document-action-enable strong{font-size:12px;color:#34495e}
+.format-document-action-enable small{font-size:10px;line-height:1.4;color:#8795a4;font-weight:500}
+.format-document-action-options{margin-top:12px}
+.document-action-field-select{margin-top:12px;padding:11px;border:1px solid #e6edf2;border-radius:10px;background:#fff}
+.document-action-field-select>strong{display:block;margin-bottom:9px;color:#42586d;font-size:11px}
+.document-action-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 12px}
+.document-action-field-option{display:flex!important;align-items:flex-start!important;gap:8px!important;min-width:0;font-size:11px!important;font-weight:500!important;color:#53677a!important;line-height:1.4;cursor:pointer}
+.document-action-field-option>span{min-width:0}
+.document-action-include-options{display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:11px;padding-top:10px;border-top:1px solid #e9eef2}
+/* Generic form rules can enlarge checkbox inputs; these scoped overrides keep all action controls compact. */
+.format-document-action-card input[type="checkbox"],
+.format-document-action-enable input[type="checkbox"],
+.document-action-field-option input[type="checkbox"],
+.document-action-include-options input[type="checkbox"]{
+ width:16px!important;height:16px!important;min-width:16px!important;min-height:16px!important;
+ max-width:16px!important;max-height:16px!important;padding:0!important;margin:1px 0 0!important;
+ border-radius:4px!important;flex:0 0 16px!important;accent-color:var(--blue,#2463a6);box-shadow:none!important;
+}
+.format-document-action-card .form-field input:not([type="checkbox"]){width:100%;min-height:36px;padding:8px 10px}
+@media(max-width:800px){
+ .document-action-field-grid{grid-template-columns:1fr}
+ .document-catalog-row{align-items:flex-start;flex-direction:column}
+ .document-action-include-options{display:grid;grid-template-columns:1fr}
+}
