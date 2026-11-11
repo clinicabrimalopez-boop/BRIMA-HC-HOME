@@ -231,7 +231,7 @@ function normalizeDocumentActionSettings(raw){
    catalogId:String(x.catalogId),buttonLabel:String(x.buttonLabel||'').trim().slice(0,80),
    documentTitle:String(x.documentTitle||'').trim().slice(0,120),
    fieldKeys:Array.isArray(x.fieldKeys)?[...new Set(x.fieldKeys.map(String))].slice(0,100):[],
-   includePatientIdentity:x.includePatientIdentity!==false,
+   includePatientIdentity:true,
    includeSomatometry:x.includeSomatometry===true,
    includeProfessionalSignature:x.includeProfessionalSignature!==false,
    showGroups:x.showGroups!==false
@@ -328,9 +328,9 @@ function collectDocumentActionConfigsFromForm(fd,schema){
   const item=settings.catalog.find(x=>x.id===catalogId&&x.active!==false);
   if(!item)continue;
   const fieldKeys=[...new Set(fd.getAll(`doc_action_fields_${catalogId}`).map(String).filter(key=>validKeys.has(key)))];
-  const includePatientIdentity=fd.get(`doc_action_patient_${catalogId}`)==='on';
+  const includePatientIdentity=true;
   const includeSomatometry=fd.get(`doc_action_somatometry_${catalogId}`)==='on';
-  if(!fieldKeys.length&&!includePatientIdentity&&!includeSomatometry){throw new Error(`La acción “${item.name}” no tiene campos ni datos generales seleccionados.`);}
+  if(!fieldKeys.length&&!includeSomatometry){throw new Error(`La acción “${item.name}” necesita al menos un campo del formato o somatometría para generar su documento.`);}
   const buttonLabel=String(fd.get(`doc_action_label_${catalogId}`)||`Generar ${item.name}`).trim();
   const documentTitle=String(fd.get(`doc_action_title_${catalogId}`)||item.documentTitle).trim();
   if(!buttonLabel||buttonLabel.length>80)throw new Error(`El texto del botón de “${item.name}” debe tener entre 1 y 80 caracteres.`);
@@ -349,7 +349,7 @@ function collectDocumentActionConfigsFromForm(fd,schema){
 function readDocumentActionFormState(root){
  const form=$('#active-modal-form',root);if(!form)return [];
  const fd=new FormData(form),settings=normalizeDocumentActionSettings(state.documentActionSettings),enabled=fd.getAll('doc_action_enabled').map(String);
- return enabled.map(catalogId=>({catalogId,buttonLabel:String(fd.get(`doc_action_label_${catalogId}`)||''),documentTitle:String(fd.get(`doc_action_title_${catalogId}`)||''),fieldKeys:fd.getAll(`doc_action_fields_${catalogId}`).map(String),includePatientIdentity:fd.get(`doc_action_patient_${catalogId}`)==='on',includeSomatometry:fd.get(`doc_action_somatometry_${catalogId}`)==='on',includeProfessionalSignature:fd.get(`doc_action_signature_${catalogId}`)==='on',showGroups:fd.get(`doc_action_groups_${catalogId}`)==='on'}));
+ return enabled.map(catalogId=>({catalogId,buttonLabel:String(fd.get(`doc_action_label_${catalogId}`)||''),documentTitle:String(fd.get(`doc_action_title_${catalogId}`)||''),fieldKeys:fd.getAll(`doc_action_fields_${catalogId}`).map(String),includePatientIdentity:true,includeSomatometry:fd.get(`doc_action_somatometry_${catalogId}`)==='on',includeProfessionalSignature:fd.get(`doc_action_signature_${catalogId}`)==='on',showGroups:fd.get(`doc_action_groups_${catalogId}`)==='on'}));
 }
 function renderFormatDocumentActionsPanel(formatId,schema,previous=[]) {
  const settings=normalizeDocumentActionSettings(state.documentActionSettings);
@@ -358,7 +358,7 @@ function renderFormatDocumentActionsPanel(formatId,schema,previous=[]) {
  const configs=Array.isArray(previous)?previous:(settings.formats[String(formatId||'')]||[]);
  return `<div class="format-document-actions-list">${catalog.map(item=>{
   const cfg=configs.find(x=>x.catalogId===item.id)||null;
-  return `<section class="format-document-action-card" data-format-doc-action="${esc(item.id)}"><label class="format-document-action-enable"><input type="checkbox" name="doc_action_enabled" value="${esc(item.id)}" ${cfg&&cfg.enabled!==false?'checked':''}><span><strong>${esc(item.name)}</strong><small>${esc(item.description||'Documento reutilizable')}</small></span></label><div class="form-grid two format-document-action-options"><label class="form-field"><span>Texto del botón para este formato</span><input name="doc_action_label_${esc(item.id)}" maxlength="80" value="${esc(cfg?.buttonLabel||`Generar ${item.name}`)}"></label><label class="form-field"><span>Título del documento</span><input name="doc_action_title_${esc(item.id)}" maxlength="120" value="${esc(cfg?.documentTitle||item.documentTitle)}"></label></div><div class="document-action-field-select"><strong>Campos que incluirá este documento</strong><div class="document-action-field-grid">${schema.map(field=>`<label class="document-action-field-option" data-doc-field-option><input type="checkbox" name="doc_action_fields_${esc(item.id)}" value="${esc(field.key)}" ${(cfg?.fieldKeys||[]).includes(field.key)?'checked':''}><span>${esc(field.label)}</span></label>`).join('')||'<small>Agrega campos al formato para poder seleccionarlos aquí.</small>'}</div></div><div class="document-action-include-options"><label class="document-action-field-option"><input type="checkbox" name="doc_action_patient_${esc(item.id)}" ${cfg?.includePatientIdentity!==false?'checked':''}><span>Ficha de identificación del paciente</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_somatometry_${esc(item.id)}" ${cfg?.includeSomatometry===true?'checked':''}><span>Somatometría y signos vitales</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_signature_${esc(item.id)}" ${cfg?.includeProfessionalSignature!==false?'checked':''}><span>Firma del profesional</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_groups_${esc(item.id)}" ${cfg?.showGroups!==false?'checked':''}><span>Conservar secciones del formato</span></label></div></section>`;
+  return `<section class="format-document-action-card" data-format-doc-action="${esc(item.id)}"><label class="format-document-action-enable"><input type="checkbox" name="doc_action_enabled" value="${esc(item.id)}" ${cfg&&cfg.enabled!==false?'checked':''}><span><strong>${esc(item.name)}</strong><small>${esc(item.description||'Documento reutilizable')}</small></span></label><div class="form-grid two format-document-action-options"><label class="form-field"><span>Texto del botón para este formato</span><input name="doc_action_label_${esc(item.id)}" maxlength="80" value="${esc(cfg?.buttonLabel||`Generar ${item.name}`)}"></label><label class="form-field"><span>Título del documento</span><input name="doc_action_title_${esc(item.id)}" maxlength="120" value="${esc(cfg?.documentTitle||item.documentTitle)}"></label></div><div class="document-action-field-select"><strong>Campos que incluirá este documento</strong><div class="document-action-field-grid">${schema.map(field=>`<label class="document-action-field-option" data-doc-field-option><input type="checkbox" name="doc_action_fields_${esc(item.id)}" value="${esc(field.key)}" ${(cfg?.fieldKeys||[]).includes(field.key)?'checked':''}><span>${esc(field.label)}</span></label>`).join('')||'<small>Agrega campos al formato para poder seleccionarlos aquí.</small>'}</div></div><div class="document-action-include-options"><div class="document-action-field-option document-action-identity-required"><span>✓</span><span><strong>Ficha completa de identificación</strong><small>Se incluye siempre en todos los documentos.</small></span></div><label class="document-action-field-option"><input type="checkbox" name="doc_action_somatometry_${esc(item.id)}" ${cfg?.includeSomatometry===true?'checked':''}><span>Somatometría y signos vitales</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_signature_${esc(item.id)}" ${cfg?.includeProfessionalSignature!==false?'checked':''}><span>Firma del profesional</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_groups_${esc(item.id)}" ${cfg?.showGroups!==false?'checked':''}><span>Conservar secciones del formato</span></label></div></section>`;
  }).join('')}</div>`;
 }
 function formatGenerateButtonLabel(formatName){
@@ -384,35 +384,59 @@ function isLaboratoryField(field){
  const key=String(field?.key||''),label=String(field?.label||''),group=String(field?.group||'');
  return /(laboratorio|gabinete|estudios?|pruebas?|an[aá]lisis|ex[aá]menes?)/i.test(`${key} ${label} ${group}`);
 }
-function extractLabsForFormat(payload){
- const fields=payload?.fields||{},schema=Array.isArray(payload?.format_schema_snapshot)?payload.format_schema_snapshot:[];
+function getLabOrderFields(payload){
+ const fields=payload?.fields||{},schema=orderedFormatSchema(payload);
  const legacyKeys=['laboratorio_orden','laboratorio','plan_estudios','estudios'];
- const used=new Set(),parts=[];
+ const usedKeys=new Set(),usedValues=new Set(),result=[];
+ const add=(key,label,value)=>{
+  const text=clinicalFieldText(value),fingerprint=clinicalValueFingerprint(text);
+  if(!text||usedKeys.has(key)||!fingerprint||usedValues.has(fingerprint))return;
+  usedKeys.add(key);usedValues.add(fingerprint);
+  result.push({key,label:String(label||'').trim()||'Laboratorio / gabinete',value:text});
+ };
+ // Detección de compatibilidad: identifica el campo de estudios, pero no lo vuelve a incluir en el resumen manual.
  for(const field of schema){
+  const key=String(field?.key||'');
+  const identity=`${key} ${String(field?.label||'')} ${String(field?.group||'')}`;
+  if(!key||/laboratorio_indicaciones|indicaciones para el estudio|instrucciones del estudio/i.test(identity))continue;
   if(!isLaboratoryField(field))continue;
-  const key=String(field?.key||''),label=String(field?.label||'');
-  const value=clinicalFieldText(fields[key]);if(value&&!used.has(key)){used.add(key);parts.push(label?`${label}:\n${value}`:value);}
+  add(key,field.label,fields[key]);
  }
- for(const key of legacyKeys){const value=clinicalFieldText(fields[key]);if(value&&!used.has(key)){used.add(key);parts.push(value);}}
- return parts.join('\n\n').trim();
+ for(const key of legacyKeys){
+  if(!schema.some(field=>String(field?.key||'')===key))add(key,'Laboratorio / gabinete',fields[key]);
+ }
+ return result;
 }
-// Devuelve campos que Administración asignó explícitamente a un documento secundario.
-// Los formatos antiguos sin esta configuración conservan su comportamiento anterior.
-function getConfiguredDocumentFields(payload,destination){
- const fields=payload?.fields||{};
- const schema=Array.isArray(payload?.format_schema_snapshot)?payload.format_schema_snapshot:[];
- return schema.filter(field=>Array.isArray(field?.document_destinations)&&field.document_destinations.includes(destination))
-  .map(field=>({key:String(field.key||''),label:String(field.label||payload?.field_labels?.[field.key]||field.key||''),value:fields[field.key]}))
-  .filter(item=>clinicalFieldText(item.value));
+function extractLabsForFormat(payload){
+ return getLabOrderFields(payload).map(item=>item.value).join('\n\n').trim();
 }
-function renderConfiguredDocumentFields(payload,destination){
- return getConfiguredDocumentFields(payload,destination).map(item=>{
+function getConfiguredDocumentFields(payload,destination,options={}){
+ const fields=payload?.fields||{},schema=orderedFormatSchema(payload);
+ const excludedKeys=new Set((options.excludeKeys||[]).map(String));
+ const excludedValues=new Set((options.excludeValues||[]).map(clinicalValueFingerprint).filter(Boolean));
+ const usedKeys=new Set(),result=[];
+ for(const field of schema){
+  const key=String(field?.key||'');
+  if(!key||usedKeys.has(key)||excludedKeys.has(key))continue;
+  if(!Array.isArray(field?.document_destinations)||!field.document_destinations.includes(destination))continue;
+  // Los campos de estudios ya se imprimen en ESTUDIOS SOLICITADOS; no deben repetirse en el resumen.
+  if(destination==='labs_summary'&&isLaboratoryField(field))continue;
+  const value=fields[key],text=clinicalFieldText(value),fingerprint=clinicalValueFingerprint(value);
+  if(!text||!fingerprint||excludedValues.has(fingerprint))continue;
+  usedKeys.add(key);
+  result.push({key,label:String(field.label||payload?.field_labels?.[key]||key),value});
+ }
+ return result;
+}
+function renderConfiguredDocumentFields(payload,destination,options={}){
+ return getConfiguredDocumentFields(payload,destination,options).map(item=>{
   const value=item.value&&typeof item.value==='object'&&item.value.meals
-   ? renderNutritionPlanTable(item.value)
-   : `<span>${esc(clinicalFieldText(item.value)).replace(/\n/g,'<br>')}</span>`;
+   ?renderNutritionPlanTable(item.value)
+   :`<span>${esc(clinicalFieldText(item.value)).replace(/\n/g,'<br>')}</span>`;
   return `<div class="clinical-document-row"><strong>${esc(item.label)}</strong>${value}</div>`;
  }).join('');
 }
+
 const ROLE_NAV = {
   admin: [ ['queue','Sala de espera','◷'], ['reception','Recepción / registrar paciente','＋'], ['patients','Todos los pacientes','▧'], ['history','Historia clínica (HC)','▣'], ['users','Profesionales y usuarios','♙'], ['templates','Personalizar formatos clínicos','✎'], ['customize','Diseño, colores y palabras','◐'], ['deletion_requests','Solicitudes de eliminación','⌫'], ['inventory','Inventario','▦'], ['backups','Respaldos y recuperación','↻'], ['audit','Auditoría','≋'], ['clinic','Establecimiento','⌂'], ['profile','Mi perfil','◉'], ['privacy','Datos y privacidad','◇'] ],
   reception: [ ['queue','Sala de espera','◷'], ['profile','Perfil profesional','◉'] ],
@@ -1230,7 +1254,7 @@ function openNoteEditor(visit,patient,triage,existing,specialty,mode='full',edit
   const fieldLabels=Object.fromEntries(specialtyDefinitions.map(f=>[f.key,f.label]));
   const fieldOrder=[...specialtyDefinitions.map(f=>f.key),'medicamentos_receta'];
   const at=nowIso();
-  const payload=stripUndefinedDeep({note_type:noteType,format_id:formatId,format_name:formatName,format_schema_snapshot:specialtyDefinitions.map(f=>({...f,options:(f.options||[]).map(o=>({...o}))})),document_actions_snapshot:customDocumentActions.map(item=>({catalogId:item.catalogId,name:item.name,buttonLabel:item.buttonLabel,documentTitle:item.documentTitle,fieldKeys:[...(item.fieldKeys||[])],includePatientIdentity:item.includePatientIdentity!==false,includeSomatometry:item.includeSomatometry===true,includeProfessionalSignature:item.includeProfessionalSignature!==false,showGroups:item.showGroups!==false})),enable_prescription:enablePrescription,enable_labs:labsEnabled,enable_professional_plan:professionalPlanEnabled,action_labels:formatActions,fields:fieldsObj,field_labels:fieldLabels,field_groups:Object.fromEntries(specialtyDefinitions.map(f=>[f.key,f.group||'Historia clínica'])),field_order:fieldOrder,schema_version:3,note_mode:mode,history_backup:carriedHistory,patient_snapshot:{...patient},triage_snapshot:triagePayload,patient_id:visit.patient_id,visit_id:visit.id,specialty,professional:state.user.profile||{},author_username:state.user.username||state.user.email||'',generated_at:at,app_version:'0.3.18'});
+  const payload=stripUndefinedDeep({note_type:noteType,format_id:formatId,format_name:formatName,format_schema_snapshot:specialtyDefinitions.map(f=>({...f,options:(f.options||[]).map(o=>({...o}))})),document_actions_snapshot:customDocumentActions.map(item=>({catalogId:item.catalogId,name:item.name,buttonLabel:item.buttonLabel,documentTitle:item.documentTitle,fieldKeys:[...(item.fieldKeys||[])],includePatientIdentity:true,includeSomatometry:item.includeSomatometry===true,includeProfessionalSignature:item.includeProfessionalSignature!==false,showGroups:item.showGroups!==false})),enable_prescription:enablePrescription,enable_labs:labsEnabled,enable_professional_plan:professionalPlanEnabled,action_labels:formatActions,fields:fieldsObj,field_labels:fieldLabels,field_groups:Object.fromEntries(specialtyDefinitions.map(f=>[f.key,f.group||'Historia clínica'])),field_order:fieldOrder,schema_version:3,note_mode:mode,history_backup:carriedHistory,patient_snapshot:{...patient},triage_snapshot:triagePayload,patient_id:visit.patient_id,visit_id:visit.id,specialty,professional:state.user.profile||{},author_username:state.user.username||state.user.email||'',generated_at:at,app_version:'0.3.19'});
   const data=stripUndefinedDeep({ownerUid:state.ownerUid,patient_id:visit.patient_id,visit_id:visit.id,kind:noteType,specialty,author_id:state.currentUser.uid,assigned_professional_id:visit.assigned_professional_id||state.currentUser.uid,interconsultation_request_id:String(visit.interconsultation_request_id||''),created_at:existing?.created_at||at,updated_at:at,finalized_at:status==='finalized'?at:'',status,payload,content_hash:''});
   const fingerprint=stableStringify(stripUndefinedDeep({fields:fieldsObj,history_backup:carriedHistory,note_type:noteType,format_id:formatId,mode}));
   return {id:draftId,data,fieldsObj:data.payload.fields,carriedHistory:data.payload.history_backup,noteType,fingerprint};
@@ -1367,13 +1391,11 @@ function renderNutritionPlanTable(value){
  return `<table class="nutrition-plan-print clinical-document-table"><thead><tr><th>PLAN ALIMENTARIO</th>${Array.from({length:6},(_,i)=>`<th>OPCIÓN ${i+1}</th>`).join('')}</tr></thead><tbody>${meals.map((m,i)=>`<tr><th>${labels[i]}</th>${Array.from({length:6},(_,j)=>`<td>${cell(value.meals?.[m]?.[j])}</td>`).join('')}</tr>`).join('')}<tr><th>SUPLEMENTACIÓN NUTRICIONAL</th><td colspan="6">${cell(value.supplementation)}</td></tr><tr><th>METAS, SEGUIMIENTO Y PRÓXIMA REVALORACIÓN</th><td colspan="6">${cell(value.goals)}</td></tr></tbody></table>`;
 }
 function openNotePrint(encounter,eid,patient){
- const payload=encounter.payload||{},fields=payload.fields||{},patientData=payload.patient_snapshot||patient||{},prof=payload.professional||{},triage=payload.triage_snapshot||{};
+ const payload=encounter.payload||{},fields=payload.fields||{},patientData=normalizePatientPrintData(patient,payload.patient_snapshot),prof=payload.professional||{},triage=payload.triage_snapshot||{};
  const value=v=>String(v&&typeof v==='object'&&v.meals?'':Array.isArray(v)?v.join(', '):v??'').trim();
  const row=(label,v,extra='')=>value(v)?`<div class="clinical-document-row ${extra}"><strong>${esc(label)}</strong><span>${esc(value(v)).replace(/\n/g,'<br>')}</span></div>`:'';
  const titleFor=key=>payload.field_labels?.[key]||((getTemplateSet(payload.specialty||'Medicina').find(x=>x[0]===key)||[])[1])||({'antecedentes_heredofamiliares':'Heredofamiliares','antecedentes_gineco_obstetricos':'Gineco-obstétricos','otras_observaciones':'Otras observaciones','antecedentes_seleccionados':'Antecedentes médicos seleccionados','antecedentes_seleccionados_otro':'Otros antecedentes seleccionados / detalle','alergias_detalle':'Detalle de alergias / reacciones','laboratorio_orden':'Laboratorio / gabinete','otras_indicaciones_recomendaciones':'Otras indicaciones y recomendaciones'}[key]||key.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()));
- const age=dob=>{if(!dob)return '';const d=new Date(`${dob}T00:00:00`);if(Number.isNaN(d.getTime()))return '';const today=new Date();let y=today.getFullYear()-d.getFullYear();if(today.getMonth()<d.getMonth()||(today.getMonth()===d.getMonth()&&today.getDate()<d.getDate()))y--;return `${Math.max(0,y)} años`;};
- const patientRows=[['Paciente',patientName(patientData)||'No registrado'],['Edad',age(patientData.dob)],['Fecha de nacimiento',patientData.dob],['Sexo',patientData.sex],['Ocupación',patientData.occupation],['Estado civil',patientData.marital],['Teléfono',patientData.phone],['CURP',patientData.curp],['Domicilio',patientData.address],['Correo',patientData.email],['Contacto de emergencia',[patientData.emergency_contact,patientData.emergency_phone].filter(Boolean).join(' · ')],['Tipo de sangre',patientData.blood_type||patientData.tipo_sangre]].filter(([,v])=>value(v));
- const identificationHtml=patientRows.map(([k,v])=>row(k,v)).join('');
+ const identificationHtml=renderPatientIdentificationRows(patientData);
  const allergyList=[...(Array.isArray(fields.alergias_seleccionadas)?fields.alergias_seleccionadas:[]),fields.alergias_detalle,triage.allergies].map(value).filter(Boolean).join(' · ');
  const historyRows=payload.schema_version>=2?'':[...MEDICAL_HISTORY_FIELDS.map(([k,l])=>row(payload.field_labels?.[k]||l,fields[k]??payload.history_backup?.[k])),row('Antecedentes médicos seleccionados',(fields.antecedentes_seleccionados||payload.history_backup?.antecedentes_seleccionados||[]).join?.(', ')||(fields.antecedentes_seleccionados||payload.history_backup?.antecedentes_seleccionados||'')),row('Otros antecedentes',fields.antecedentes_seleccionados_otro||payload.history_backup?.antecedentes_seleccionados_otro),row('Alergias y reacciones',allergyList),row('Medicamentos actuales',triage.current_medications||fields.medicamentos_actuales)].filter(Boolean).join('');
  const historyKeys=payload.schema_version>=2?new Set(['medicamentos','medicamentos_receta']):new Set([...MEDICAL_HISTORY_FIELDS.map(([k])=>k),'antecedentes_seleccionados','antecedentes_seleccionados_otro','alergias_seleccionadas','alergias_detalle','medicamentos_actuales','medicamentos','medicamentos_receta','laboratorio_orden','laboratorio','plan_estudios','estudios','laboratorio_indicaciones','otras_indicaciones_recomendaciones','indicaciones']);
@@ -1391,9 +1413,15 @@ function openNotePrint(encounter,eid,patient){
  const meds=Array.isArray(fields.medicamentos_receta)?fields.medicamentos_receta.filter(m=>value(m.name||m.medicamento)):[];
  const medTable=meds.length?`<h3>Prescripción / medicamentos</h3><table class="clinical-document-table"><thead><tr><th>Medicamento</th><th>Dosis</th><th>Vía</th><th>Frecuencia</th><th>Duración</th><th>Indicaciones</th></tr></thead><tbody>${meds.map(m=>`<tr><td>${esc(m.name||m.medicamento||'')}</td><td>${esc(m.dose||m.dosis||'—')}</td><td>${esc(m.route||m.via||'—')}</td><td>${esc(m.frequency||m.frecuencia||'—')}</td><td>${esc(m.duration||m.duracion||'—')}</td><td>${esc(m.instructions||m.indicaciones||'—')}</td></tr>`).join('')}</tbody></table>`:'';
  const planRows=[...plan];
- if(value(fields.laboratorio_orden||fields.laboratorio||fields.plan_estudios||fields.estudios))planRows.push({key:'laboratorio_orden',label:titleFor('laboratorio_orden')||'Laboratorio / gabinete',value:fields.laboratorio_orden||fields.laboratorio||fields.plan_estudios||fields.estudios});
- if(value(fields.laboratorio_indicaciones))planRows.push({key:'laboratorio_indicaciones',label:titleFor('laboratorio_indicaciones')||'Indicaciones para laboratorio',value:fields.laboratorio_indicaciones});
- if(value(fields.otras_indicaciones_recomendaciones||fields.indicaciones))planRows.push({key:'otras_indicaciones_recomendaciones',label:titleFor('otras_indicaciones_recomendaciones')||'Otras indicaciones y recomendaciones',value:fields.otras_indicaciones_recomendaciones||fields.indicaciones});
+ const appendPlanEntryOnce=item=>{
+  const fingerprint=clinicalValueFingerprint(item.value);
+  if(!planRows.some(existing=>String(existing.key)===String(item.key)|| (fingerprint&&clinicalValueFingerprint(existing.value)===fingerprint)))planRows.push(item);
+ };
+ const legacyLabValue=fields.laboratorio_orden||fields.laboratorio||fields.plan_estudios||fields.estudios;
+ if(value(legacyLabValue))appendPlanEntryOnce({key:'laboratorio_orden',label:titleFor('laboratorio_orden')||'Laboratorio / gabinete',value:legacyLabValue});
+ if(value(fields.laboratorio_indicaciones))appendPlanEntryOnce({key:'laboratorio_indicaciones',label:titleFor('laboratorio_indicaciones')||'Indicaciones para laboratorio',value:fields.laboratorio_indicaciones});
+ const legacyExtraValue=fields.otras_indicaciones_recomendaciones||fields.indicaciones;
+ if(value(legacyExtraValue))appendPlanEntryOnce({key:'otras_indicaciones_recomendaciones',label:titleFor('otras_indicaciones_recomendaciones')||'Otras indicaciones y recomendaciones',value:legacyExtraValue});
  const planHtml=(planRows.length||medTable)&&!useSchemaGroups?`<section class="clinical-document-section"><h2>PLAN TERAPÉUTICO E INDICACIONES</h2>${renderEntries(planRows)}${medTable}</section>`:(!useSchemaGroups&&medTable?`<section class="clinical-document-section"><h2>PLAN TERAPÉUTICO E INDICACIONES</h2>${medTable}</section>`:'');
  const otherHtml=other.length&&!useSchemaGroups?`<section class="clinical-document-section"><h2>OTROS DATOS CLÍNICOS</h2>${renderEntries(other)}</section>`:'';
  const profLine=[prof.profession||payload.specialty||'',prof.cedula?`Cédula profesional: ${prof.cedula}`:'',prof.institution||'',prof.phone?`Teléfono: ${prof.phone}`:''].filter(Boolean).map(esc).join(' · ');
@@ -1406,21 +1434,72 @@ function customDocumentValueHtml(value){
  const text=Array.isArray(value)?value.map(x=>String(x??'').trim()).filter(Boolean).join(', '):typeof value==='object'?clinicalFieldText(value):String(value??'');
  return `<span>${esc(text).replace(/\n/g,'<br>')}</span>`;
 }
-function customDocumentPatientRows(patientData){
- const p=patientData&&typeof patientData==='object'?patientData:{};
- const birth=p.dob?new Date(`${p.dob}T00:00:00`):null;
- let age='';
- if(birth&&!Number.isNaN(birth.getTime())){const today=new Date();let years=today.getFullYear()-birth.getFullYear();if(today.getMonth()<birth.getMonth()||(today.getMonth()===birth.getMonth()&&today.getDate()<birth.getDate()))years--;age=`${Math.max(0,years)} años`;}
- const rows=[['Paciente',patientName(p)],['Edad',age],['Fecha de nacimiento',p.dob],['Sexo',p.sex],['CURP',p.curp],['Teléfono',p.phone],['Correo electrónico',p.email],['Domicilio',p.address],['Ocupación',p.occupation],['Estado civil',p.marital],['Contacto de emergencia',p.emergency_contact],['Parentesco',p.relationship],['Teléfono de emergencia',p.emergency_phone],['Madre/padre/tutor',p.guardian]];
- return rows.filter(([,v])=>v!==undefined&&v!==null&&String(v).trim()!=='').map(([label,value])=>`<div class="clinical-document-row"><strong>${esc(label)}</strong><span>${esc(value)}</span></div>`).join('');
+function normalizePatientPrintData(patient, snapshot){
+ const unwrap=value=>value&&typeof value==='object'
+  ?(value.payload&&typeof value.payload==='object'?value.payload:value)
+  :{};
+ const result={...unwrap(snapshot)};
+ // The live patient record is preferred when it contains a value; otherwise use the immutable snapshot.
+ for(const [key,value] of Object.entries(unwrap(patient))){
+  if(value!==undefined&&value!==null&&String(value).trim()!=='')result[key]=value;
+ }
+ return result;
 }
+function patientAgeForPrint(dob){
+ if(!dob)return '';
+ const birth=new Date(`${dob}T00:00:00`);
+ if(Number.isNaN(birth.getTime()))return '';
+ const today=new Date();let years=today.getFullYear()-birth.getFullYear();
+ if(today.getMonth()<birth.getMonth()||(today.getMonth()===birth.getMonth()&&today.getDate()<birth.getDate()))years--;
+ return `${Math.max(0,years)} años`;
+}
+function renderPatientIdentificationRows(patient, snapshot=null, extraRows=[]){
+ const p=normalizePatientPrintData(patient,snapshot);
+ const fullName=patientName(p)==='Paciente sin nombre'
+  ?String(p.full_name||p.name||p.nombre_completo||'No registrado')
+  :patientName(p);
+ const rows=[
+  ['Paciente',fullName],['Edad',patientAgeForPrint(p.dob)],
+  ...PATIENT_FIELDS.filter(([key])=>!['first_name','last_name1','last_name2'].includes(key)).map(([key,label])=>[label,p[key]]),
+  ['Tipo de sangre',p.blood_type||p.tipo_sangre],
+  ...extraRows
+ ];
+ const seen=new Set();
+ return rows.filter(([label,value])=>{
+  if(value===undefined||value===null||String(value).trim()==='')return false;
+  const id=String(label).trim().toLocaleLowerCase('es-MX');
+  if(seen.has(id))return false;seen.add(id);return true;
+ }).map(([label,value])=>`<div class="clinical-document-row"><strong>${esc(label)}</strong><span>${esc(Array.isArray(value)?value.join(', '):String(value)).replace(/\n/g,'<br>')}</span></div>`).join('');
+}
+function clinicalValueFingerprint(value){
+ let raw='';
+ if(value&&typeof value==='object'){
+  if(value.meals)raw=JSON.stringify(value);
+  else raw=clinicalFieldText(value);
+ }else raw=clinicalFieldText(value);
+ return String(raw||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('es-MX').replace(/\s+/g,' ').trim();
+}
+function orderedFormatSchema(payload){
+ const schema=Array.isArray(payload?.format_schema_snapshot)?payload.format_schema_snapshot:[];
+ const byKey=new Map();
+ for(const field of schema){const key=String(field?.key||'');if(key&&!byKey.has(key))byKey.set(key,field);}
+ const order=Array.isArray(payload?.field_order)?payload.field_order.map(String):[];
+ const result=[];
+ for(const key of order){const field=byKey.get(key);if(field){result.push(field);byKey.delete(key);}}
+ for(const field of schema){const key=String(field?.key||'');if(key&&byKey.has(key)){result.push(field);byKey.delete(key);}}
+ return result;
+}
+function customDocumentPatientRows(patientData,snapshot=null){
+ return renderPatientIdentificationRows(patientData,snapshot);
+}
+
 function openCustomDocumentPrint(encounter,patient,actionConfig){
- const p=encounter?.payload||{},fields=p.fields||{},schema=Array.isArray(p.format_schema_snapshot)?p.format_schema_snapshot:[],professional=p.professional||{},triage=p.triage_snapshot||{};
- const selectedKeys=new Set(Array.isArray(actionConfig?.fieldKeys)?actionConfig.fieldKeys:[]);
- const entries=schema.filter(field=>selectedKeys.has(String(field.key||''))&&hasClinicalFieldValue(fields[field.key]));
- const patientData=(patient?.payload&&typeof patient.payload==='object')?patient.payload:((p.patient_snapshot&&typeof p.patient_snapshot==='object')?p.patient_snapshot:(patient||{}));
- const includePatient=actionConfig?.includePatientIdentity!==false,includeSomatometry=actionConfig?.includeSomatometry===true,includeSignature=actionConfig?.includeProfessionalSignature!==false,showGroups=actionConfig?.showGroups!==false;
- if(!entries.length&&!includePatient&&!includeSomatometry){toast('Este documento no tiene datos capturados para imprimir. Revisa los campos seleccionados en Administración.','warning',8000);return;}
+ const p=encounter?.payload||{},fields=p.fields||{},schema=orderedFormatSchema(p),professional=p.professional||{},triage=p.triage_snapshot||{};
+ const selectedKeys=new Set(Array.isArray(actionConfig?.fieldKeys)?actionConfig.fieldKeys:[]),usedFieldKeys=new Set();
+ const entries=schema.filter(field=>{const key=String(field?.key||'');if(!key||!selectedKeys.has(key)||usedFieldKeys.has(key)||!hasClinicalFieldValue(fields[key]))return false;usedFieldKeys.add(key);return true;});
+ const patientData=normalizePatientPrintData(patient,p.patient_snapshot);
+ const includePatient=true,includeSomatometry=actionConfig?.includeSomatometry===true,includeSignature=actionConfig?.includeProfessionalSignature!==false,showGroups=actionConfig?.showGroups!==false;
+ if(!entries.length&&!includeSomatometry){toast('Este documento no tiene campos capturados ni somatometría seleccionada. Revisa los campos en Administración.','warning',8000);return;}
  let content='';
  if(showGroups){
   const grouped=new Map();for(const field of entries){const group=String(field.group||'Documento');if(!grouped.has(group))grouped.set(group,[]);grouped.get(group).push(field);}
@@ -1430,7 +1509,7 @@ function openCustomDocumentPrint(encounter,patient,actionConfig){
  }
  const documentTitle=String(actionConfig?.documentTitle||actionConfig?.name||'DOCUMENTO').trim();
  const profLine=[professional.profession||p.specialty||'',professional.cedula?`Cédula profesional: ${professional.cedula}`:'',professional.institution||'',professional.phone?`Teléfono: ${professional.phone}`:''].filter(Boolean).map(esc).join(' · ');
- const identity=includePatient?`<section class="clinical-document-section"><h2>DATOS DE IDENTIFICACIÓN</h2><div class="clinical-patient-grid">${customDocumentPatientRows(patientData)}</div></section>`:'';
+ const identity=includePatient?`<section class="clinical-document-section"><h2>DATOS DE IDENTIFICACIÓN</h2><div class="clinical-patient-grid">${renderPatientIdentificationRows(patientData)}</div></section>`:'';
  const soma=includeSomatometry?printSomatometrySection(triage):'';
  const signature=includeSignature?`<footer class="clinical-document-signature"><strong>${esc(professional.full_name||'Profesional responsable')}</strong><small>${esc(professional.cedula?`Cédula profesional: ${professional.cedula}`:'')}</small><span>Firma del profesional</span></footer>`:'';
  const docHtml=`<article id="print-note" class="clinical-document" ${clinicalPrintThemeAttr(p.specialty||state.user?.profile?.specialty||'Medicina')}><header class="clinical-document-header"><div class="clinical-document-brand">${esc(professional.full_name||'Profesional responsable')}</div><div class="clinical-document-subtitle">${esc(professional.profession||p.specialty||'Atención clínica')}</div><div class="clinical-document-profline">${profLine}</div></header><div class="clinical-document-titlebar"><strong>${esc(documentTitle)}</strong><span>Fecha: <b>${esc(formatDate(encounter?.finalized_at||encounter?.updated_at||p.generated_at))}</b></span></div>${identity}${soma}${content}${signature}</article>`;
@@ -1438,10 +1517,11 @@ function openCustomDocumentPrint(encounter,patient,actionConfig){
 }
 
 function openPrescriptionPrint(encounter,patient){
- const p=encounter.payload||{},f=p.fields||{},specialty=p.specialty||'Medicina',prof=p.professional||{},triage=p.triage_snapshot||{};
+ const p=encounter.payload||{},f=p.fields||{},specialty=p.specialty||'Medicina',prof=p.professional||{},triage=p.triage_snapshot||{},patientData=normalizePatientPrintData(patient,p.patient_snapshot);
  const isMedicine=p.force_professional_plan!==true&&(p.enable_prescription===true||(p.enable_prescription===undefined&&String(specialty).trim().toLocaleLowerCase('es-MX')==='medicina'));
  const meds=isMedicine&&Array.isArray(f.medicamentos_receta)?f.medicamentos_receta.filter(m=>String(m.name||m.medicamento||'').trim()):[];
- const patientRows=[['Paciente',patientName(patient)],['Fecha de nacimiento',patient?.dob],['Sexo',patient?.sex],['Teléfono',patient?.phone],['Alergias',f.alergias_detalle||((Array.isArray(f.alergias_seleccionadas)?f.alergias_seleccionadas:[]).join(', '))]].filter(([,v])=>String(v||'').trim()).map(([k,v])=>`<div class="clinical-document-row"><strong>${esc(k)}</strong><span>${esc(v)}</span></div>`).join('');
+ const allergyValue=[...(Array.isArray(f.alergias_seleccionadas)?f.alergias_seleccionadas:[]),f.alergias_detalle,triage.allergies].filter(v=>String(v||'').trim()).join(' · ');
+ const patientRows=renderPatientIdentificationRows(patientData,null,allergyValue?[['Alergias referidas',allergyValue]]:[]);
  const lab=String(f.laboratorio_orden||f.laboratorio||f.estudios||'').trim();
  const extra=String(f.otras_indicaciones_recomendaciones||f.indicaciones||'').trim();
  let labToPrint=lab,extraToPrint=extra;
@@ -1463,7 +1543,9 @@ function openPrescriptionPrint(encounter,patient){
    if(!selectedLegacyLab)labToPrint='';
    if(!selectedLegacyExtra)extraToPrint='';
   }
-  const entries=Object.entries(f).filter(([key,value])=>{ 
+  const orderedFieldEntries=orderedFormatSchema(p).map(field=>[String(field.key||''),f[String(field.key||'')]]).filter(([key])=>key&&Object.prototype.hasOwnProperty.call(f,key));
+  const sourceFieldEntries=orderedFieldEntries.length?orderedFieldEntries:Object.entries(f);
+  const entries=sourceFieldEntries.filter(([key,value])=>{
    if(exclude.test(key))return false;
    const text=(value&&typeof value==='object'&&value.meals)?JSON.stringify(value):(Array.isArray(value)?value.join(', '):String(value??'').trim());
    const belongs=hasExplicitPlanConfig?selectedPlanFields.has(key):allowed.test(String(groups[key]||key.replace(/_/g,' '))+' '+String(p.field_labels?.[key]||''));
@@ -1479,9 +1561,9 @@ function openPrescriptionPrint(encounter,patient){
    return `<div class="clinical-document-row"><strong>${esc(label)}</strong><span>${esc(text).replace(/\n/g,'<br>')}</span></div>`;
   }).join('');
  }
- const configuredExtra=isMedicine?renderConfiguredDocumentFields(p,'prescription'):'';
+ const configuredExtra=isMedicine?renderConfiguredDocumentFields(p,'prescription',{excludeKeys:['medicamentos_receta','laboratorio_orden','laboratorio','plan_estudios','estudios','laboratorio_indicaciones','otras_indicaciones_recomendaciones','indicaciones'],excludeValues:[lab,extra]}):'';
  if(configuredExtra)planHtml+=configuredExtra;
- const docHtml=`<article id="print-note" class="clinical-document" ${clinicalPrintThemeAttr(specialty)}><header class="clinical-document-header"><div class="clinical-document-brand">${esc(prof.full_name||'Profesional responsable')}</div><div class="clinical-document-subtitle">${esc(prof.profession||specialty)}</div><div class="clinical-document-profline">${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</div></header><div class="clinical-document-titlebar"><strong>${esc(title)}</strong><span>Fecha: <b>${esc(formatDate(encounter.finalized_at||encounter.updated_at||p.generated_at))}</b></span></div><section class="clinical-document-section"><h2>DATOS DEL PACIENTE</h2>${patientRows}</section>${printSomatometrySection(triage)}<section class="clinical-document-section"><h2>${isMedicine?'PRESCRIPCIÓN':'PLAN DE INTERVENCIÓN'}</h2>${planHtml}</section>${labToPrint?`<section class="clinical-document-section"><h2>ESTUDIOS SOLICITADOS</h2><div class="clinical-document-row"><strong>Laboratorio / gabinete</strong><span>${esc(labToPrint).replace(/\n/g,'<br>')}</span></div>`:''}${extraToPrint?`<section class="clinical-document-section"><h2>INDICACIONES Y RECOMENDACIONES</h2><div class="clinical-document-row"><strong>Indicaciones</strong><span>${esc(extraToPrint).replace(/\n/g,'<br>')}</span></div></section>`:''}<footer class="clinical-document-signature"><strong>${esc(prof.full_name||'Profesional responsable')}</strong><small>${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</small><span>Firma del profesional</span></footer></article>`;
+ const docHtml=`<article id="print-note" class="clinical-document" ${clinicalPrintThemeAttr(specialty)}><header class="clinical-document-header"><div class="clinical-document-brand">${esc(prof.full_name||'Profesional responsable')}</div><div class="clinical-document-subtitle">${esc(prof.profession||specialty)}</div><div class="clinical-document-profline">${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</div></header><div class="clinical-document-titlebar"><strong>${esc(title)}</strong><span>Fecha: <b>${esc(formatDate(encounter.finalized_at||encounter.updated_at||p.generated_at))}</b></span></div><section class="clinical-document-section"><h2>DATOS DE IDENTIFICACIÓN</h2><div class="clinical-patient-grid">${patientRows}</div></section>${printSomatometrySection(triage)}<section class="clinical-document-section"><h2>${isMedicine?'PRESCRIPCIÓN':'PLAN DE INTERVENCIÓN'}</h2>${planHtml}</section>${labToPrint?`<section class="clinical-document-section"><h2>ESTUDIOS SOLICITADOS</h2><div class="clinical-document-row"><strong>Laboratorio / gabinete</strong><span>${esc(labToPrint).replace(/\n/g,'<br>')}</span></div>`:''}${extraToPrint?`<section class="clinical-document-section"><h2>INDICACIONES Y RECOMENDACIONES</h2><div class="clinical-document-row"><strong>Indicaciones</strong><span>${esc(extraToPrint).replace(/\n/g,'<br>')}</span></div></section>`:''}<footer class="clinical-document-signature"><strong>${esc(prof.full_name||'Profesional responsable')}</strong><small>${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</small><span>Firma del profesional</span></footer></article>`;
  openModal(`${title} · Vista previa`,`<div class="historia-print-shell"><div class="historia-print-preview">${docHtml}</div><div class="historia-print-help">Somatometría procedente de la valoración registrada por Enfermería.</div></div>`,{size:'wide',buttons:[{action:'close',label:'Cerrar'},{action:'print',label:'Imprimir / guardar PDF',primary:true}],onAction:async action=>{if(action==='print'){printClinicalDocument(docHtml);return false;}return true;}});
 }
 function openProfessionalPlanPrint(encounter,patient){
@@ -1490,17 +1572,22 @@ function openProfessionalPlanPrint(encounter,patient){
  openPrescriptionPrint({...encounter,payload:{...payload,enable_prescription:false,force_professional_plan:true}},patient);
 }
 function openLabsPrint(encounter,patient){
- const p=encounter.payload||{},f=p.fields||{},prof=p.professional||{},triage=p.triage_snapshot||{},specialty=p.specialty||'';
- const labs=extractLabsForFormat(p);
- if(!labs){toast('Captura al menos un estudio en “Laboratorio / gabinete” para generar la orden.','warning');return;}
- const patientRows=[['Paciente',patientName(patient)],['Fecha de nacimiento',patient?.dob],['Sexo',patient?.sex],['Teléfono',patient?.phone],['Alergias',f.alergias_detalle||((Array.isArray(f.alergias_seleccionadas)?f.alergias_seleccionadas:[]).join(', '))]].filter(([,v])=>String(v||'').trim()).map(([k,v])=>`<div class="clinical-document-row"><strong>${esc(k)}</strong><span>${esc(v)}</span></div>`).join('');
- const configuredSummary=getConfiguredDocumentFields(p,'labs_summary');
+ const p=encounter.payload||{},f=p.fields||{},prof=p.professional||{},triage=p.triage_snapshot||{},specialty=p.specialty||'',patientData=normalizePatientPrintData(patient,p.patient_snapshot);
+ const labItems=getLabOrderFields(p);
+ if(!labItems.length){toast('Captura al menos un estudio en “Laboratorio / gabinete” para generar la orden.','warning');return;}
+ const studiesHtml=labItems.map(item=>`<div class="clinical-document-row"><strong>${esc(item.label)}</strong><span>${esc(item.value).replace(/\n/g,'<br>')}</span></div>`).join('');
+ const allergyValue=[...(Array.isArray(f.alergias_seleccionadas)?f.alergias_seleccionadas:[]),f.alergias_detalle,triage.allergies].filter(v=>String(v||'').trim()).join(' · ');
+ const patientRows=renderPatientIdentificationRows(patientData,null,allergyValue?[['Alergias referidas',allergyValue]]:[]);
+ const configuredSummary=getConfiguredDocumentFields(p,'labs_summary',{excludeKeys:['laboratorio_orden','laboratorio','plan_estudios','estudios','laboratorio_indicaciones'],excludeValues:labItems.map(item=>item.value)});
+ const schema=Array.isArray(p.format_schema_snapshot)?p.format_schema_snapshot:[];
+ const hasExplicitSummaryConfig=schema.some(field=>Array.isArray(field?.document_destinations)||Object.prototype.hasOwnProperty.call(field||{},'include_in_labs_summary'));
  const diagnosis=f.diagnostico||f.impresion||f.impresion_diagnostica||f.diagnostico_nutricional||f.evaluacion||'';
  const peea=f.peea||f.historia||f.historia_padecimiento||f.padecimiento_actual||'';
- const summaryHtml=configuredSummary.length
-  ? configuredSummary.map(item=>`<div class="clinical-document-row"><strong>${esc(item.label)}</strong><span>${esc(clinicalFieldText(item.value)).replace(/\n/g,'<br>')}</span></div>`).join('')
-  : `<div class="clinical-document-row"><strong>Diagnóstico</strong><span>${esc(diagnosis||'No registrado en la nota')}</span></div><div class="clinical-document-row"><strong>PEEA</strong><span>${esc(peea||'No registrado en la nota')}</span></div>`;
- const docHtml=`<article id="print-note" class="clinical-document" ${clinicalPrintThemeAttr(specialty)}><header class="clinical-document-header"><div class="clinical-document-brand">${esc(prof.full_name||'Profesional responsable')}</div><div class="clinical-document-subtitle">${esc(prof.profession||specialty||'Atención clínica')}</div><div class="clinical-document-profline">${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</div></header><div class="clinical-document-titlebar"><strong>ORDEN DE LABORATORIOS / GABINETE</strong><span>Fecha: <b>${esc(formatDate(encounter.finalized_at||encounter.updated_at||p.generated_at))}</b></span></div><section class="clinical-document-section"><h2>DATOS DEL PACIENTE</h2>${patientRows}</section>${printSomatometrySection(triage)}<section class="clinical-document-section"><h2>ESTUDIOS SOLICITADOS</h2><div class="clinical-document-row"><strong>Laboratorio / gabinete</strong><span>${esc(labs).replace(/\n/g,'<br>')}</span></div>${String(f.laboratorio_indicaciones||'').trim()?`<div class="clinical-document-row"><strong>Indicaciones para el estudio</strong><span>${esc(f.laboratorio_indicaciones).replace(/\n/g,'<br>')}</span></div>`:''}</section><section class="clinical-document-section"><h2>RESUMEN CLÍNICO</h2>${summaryHtml}</section><footer class="clinical-document-signature"><strong>${esc(prof.full_name||'Profesional responsable')}</strong><small>${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</small><span>Firma del profesional</span></footer></article>`;
+ const legacySummary=!hasExplicitSummaryConfig?[['Diagnóstico',diagnosis],['PEEA',peea]].filter(([,v])=>clinicalFieldText(v)).map(([label,value])=>({label,value})):[];
+ const summaryItems=configuredSummary.length?configuredSummary:legacySummary;
+ const summaryHtml=summaryItems.map(item=>`<div class="clinical-document-row"><strong>${esc(item.label)}</strong><span>${esc(clinicalFieldText(item.value)).replace(/\n/g,'<br>')}</span></div>`).join('');
+ const summarySection=summaryHtml?`<section class="clinical-document-section"><h2>RESUMEN CLÍNICO</h2>${summaryHtml}</section>`:'';
+ const docHtml=`<article id="print-note" class="clinical-document" ${clinicalPrintThemeAttr(specialty)}><header class="clinical-document-header"><div class="clinical-document-brand">${esc(prof.full_name||'Profesional responsable')}</div><div class="clinical-document-subtitle">${esc(prof.profession||specialty||'Atención clínica')}</div><div class="clinical-document-profline">${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</div></header><div class="clinical-document-titlebar"><strong>ORDEN DE LABORATORIOS / GABINETE</strong><span>Fecha: <b>${esc(formatDate(encounter.finalized_at||encounter.updated_at||p.generated_at))}</b></span></div><section class="clinical-document-section"><h2>DATOS DE IDENTIFICACIÓN</h2><div class="clinical-patient-grid">${patientRows}</div></section>${printSomatometrySection(triage)}<section class="clinical-document-section"><h2>ESTUDIOS SOLICITADOS</h2>${studiesHtml}${String(f.laboratorio_indicaciones||'').trim()?`<div class="clinical-document-row"><strong>Indicaciones para el estudio</strong><span>${esc(f.laboratorio_indicaciones).replace(/\n/g,'<br>')}</span></div>`:''}</section>${summarySection}<footer class="clinical-document-signature"><strong>${esc(prof.full_name||'Profesional responsable')}</strong><small>${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</small><span>Firma del profesional</span></footer></article>`;
  openModal('Orden de laboratorios · Vista previa',`<div class="historia-print-shell"><div class="historia-print-preview">${docHtml}</div></div>`,{size:'wide',buttons:[{action:'close',label:'Cerrar'},{action:'print',label:'Imprimir / guardar PDF',primary:true}],onAction:async action=>{if(action==='print'){printClinicalDocument(docHtml);return false;}return true;}});
 }
 
@@ -1668,7 +1755,7 @@ function captureDocumentActionPanel(root){
  return $$('.format-document-action-card',panel).map(card=>{
   const id=card.dataset.formatDocAction||'';
   const get=name=>Array.from(card.querySelectorAll('[name]')).find(x=>x.name===name)||null;
-  return {catalogId:id,enabled:!!get('doc_action_enabled')?.checked,buttonLabel:String(get(`doc_action_label_${id}`)?.value||''),documentTitle:String(get(`doc_action_title_${id}`)?.value||''),fieldKeys:$$(`[name="doc_action_fields_${id}"]:checked`,card).map(x=>x.value),includePatientIdentity:!!get(`doc_action_patient_${id}`)?.checked,includeSomatometry:!!get(`doc_action_somatometry_${id}`)?.checked,includeProfessionalSignature:!!get(`doc_action_signature_${id}`)?.checked,showGroups:!!get(`doc_action_groups_${id}`)?.checked};
+  return {catalogId:id,enabled:!!get('doc_action_enabled')?.checked,buttonLabel:String(get(`doc_action_label_${id}`)?.value||''),documentTitle:String(get(`doc_action_title_${id}`)?.value||''),fieldKeys:$$(`[name="doc_action_fields_${id}"]:checked`,card).map(x=>x.value),includePatientIdentity:true,includeSomatometry:!!get(`doc_action_somatometry_${id}`)?.checked,includeProfessionalSignature:!!get(`doc_action_signature_${id}`)?.checked,showGroups:!!get(`doc_action_groups_${id}`)?.checked};
  });
 }
 async function renderTemplates(){
