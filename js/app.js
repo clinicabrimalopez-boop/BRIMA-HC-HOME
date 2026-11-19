@@ -212,155 +212,155 @@ function formatActionLabels(format,specialty=''){
  return {...defaultFormatActionLabels(specialty),...(format?.action_labels&&typeof format.action_labels==='object'?format.action_labels:{})};
 }
 
-// Catálogo de documentos reutilizables. Las asignaciones por formato se guardan
-// en configuracion/document_action_catalog para no alterar ni reordenar el schema existente.
+// Catálogo general de generadores. Las plantillas estándar son editables y las acciones
+// asignadas/selecciones de campos se guardan por formato, sin modificar su schema ni field_order.
 const DOCUMENT_ACTION_CONFIG_KEY='document_action_catalog';
+const BUILTIN_DOCUMENT_ACTIONS=[
+ {id:'builtin_prescription',type:'prescription',name:'Receta médica',documentTitle:'RECETA MÉDICA',description:'Generador de prescripción con tabla de medicamentos.',builtIn:true},
+ {id:'builtin_labs',type:'labs',name:'Orden de laboratorios / gabinete',documentTitle:'ORDEN DE LABORATORIOS / GABINETE',description:'Solicitud de estudios y datos clínicos seleccionados.',builtIn:true},
+ {id:'builtin_professional_plan',type:'professional_plan',name:'Plan profesional',documentTitle:'PLAN PROFESIONAL',description:'Plan, intervenciones, objetivos y seguimiento.',builtIn:true}
+];
 function normalizeDocumentActionSettings(raw){
  const source=raw&&typeof raw==='object'?raw:{};
- const catalog=Array.isArray(source.catalog)?source.catalog.filter(x=>x&&typeof x==='object'&&String(x.id||'').trim()).map(x=>({
-  id:String(x.id),name:String(x.name||'Documento personalizado').trim().slice(0,80),
+ const incoming=Array.isArray(source.catalog)?source.catalog:[];
+ const catalog=incoming.filter(x=>x&&typeof x==='object'&&String(x.id||'').trim()).map(x=>({
+  id:String(x.id),type:['prescription','labs','professional_plan'].includes(x.type)?x.type:'custom',
+  name:String(x.name||'Documento personalizado').trim().slice(0,80),
   documentTitle:String(x.documentTitle||x.name||'Documento').trim().slice(0,120),
   description:String(x.description||'').trim().slice(0,240),active:x.active!==false,
+  builtIn:x.builtIn===true||String(x.id).startsWith('builtin_'),
   created_at:String(x.created_at||''),updated_at:String(x.updated_at||'')
- })):[];
+ }));
+ for(const builtin of BUILTIN_DOCUMENT_ACTIONS){
+  if(!catalog.some(x=>x.id===builtin.id))catalog.unshift({...builtin,active:true,created_at:'',updated_at:''});
+ }
  const formats=source.formats&&typeof source.formats==='object'&&!Array.isArray(source.formats)?source.formats:{};
  const cleanFormats={};
  for(const [formatId,items] of Object.entries(formats)){
   if(!Array.isArray(items))continue;
   cleanFormats[String(formatId)]=items.filter(x=>x&&typeof x==='object'&&String(x.catalogId||'').trim()).map(x=>({
-   catalogId:String(x.catalogId),buttonLabel:String(x.buttonLabel||'').trim().slice(0,80),
-   documentTitle:String(x.documentTitle||'').trim().slice(0,120),
+   catalogId:String(x.catalogId),type:['prescription','labs','professional_plan'].includes(x.type)?x.type:'custom',
+   buttonLabel:String(x.buttonLabel||'').trim().slice(0,80),documentTitle:String(x.documentTitle||'').trim().slice(0,120),
    fieldKeys:Array.isArray(x.fieldKeys)?[...new Set(x.fieldKeys.map(String))].slice(0,100):[],
-   includePatientIdentity:true,
-   includeSomatometry:x.includeSomatometry===true,
-   includeProfessionalSignature:x.includeProfessionalSignature!==false,
+   includePatientIdentity:true,includeMedicationTable:x.includeMedicationTable===true,
+   includeSomatometry:x.includeSomatometry===true,includeProfessionalSignature:x.includeProfessionalSignature!==false,
    showGroups:x.showGroups!==false
   }));
  }
- return {version:1,catalog,formats:cleanFormats};
+ return {version:Number(source.version)||1,catalog,formats:cleanFormats};
 }
 async function loadDocumentActionSettings(){
- try{
-  const snap=await getDoc(doc(db,'configuracion',DOCUMENT_ACTION_CONFIG_KEY));
-  state.documentActionSettings=snap.exists()&&snap.data().ownerUid===state.ownerUid
-   ?normalizeDocumentActionSettings(snap.data().value):normalizeDocumentActionSettings({});
- }catch(err){
-  console.warn('No se pudo cargar el catálogo de documentos reutilizables.',err);
-  state.documentActionSettings=normalizeDocumentActionSettings({});
- }
+ try{const snap=await getDoc(doc(db,'configuracion',DOCUMENT_ACTION_CONFIG_KEY));state.documentActionSettings=snap.exists()&&snap.data().ownerUid===state.ownerUid?normalizeDocumentActionSettings(snap.data().value):normalizeDocumentActionSettings({});}
+ catch(err){console.warn('No se pudo cargar el catálogo de generadores.',err);state.documentActionSettings=normalizeDocumentActionSettings({});}
  return state.documentActionSettings;
 }
-async function saveDocumentActionSettings(next){
+async function saveDocumentActionSettings(next,{explicitFormatIds=[],skipFormatIds=[]}={}){
  if(state.user?.role!=='admin')throw new Error('Solo Administración puede modificar el catálogo de documentos.');
  const normalized=normalizeDocumentActionSettings(next);
+ // Migración única v1 -> v2: conserva los tres generadores estándar que antes vivían en el documento del formato.
+ if(normalized.version<2){
+  const explicit=new Set(explicitFormatIds.map(String)),skip=new Set(skipFormatIds.map(String));
+  for(const format of (state.clinicalFormats||[])){
+   const id=String(format.id||'');if(!id||explicit.has(id)||skip.has(id))continue;
+   const legacy=legacyFormatDocumentActions(format);if(!legacy.length)continue;
+   const current=normalized.formats[id]||[];
+   const merged=[...current];for(const action of legacy)if(!merged.some(x=>x.catalogId===action.catalogId))merged.push(action);
+   if(merged.length)normalized.formats[id]=merged;
+  }
+ }
+ normalized.version=2;
  const serializedSize=new TextEncoder().encode(JSON.stringify(normalized)).length;
- if(serializedSize>700000)throw new Error('El catálogo de documentos está alcanzando su límite seguro. Retira acciones antiguas o divide el catálogo antes de continuar.');
- await saveSetting(DOCUMENT_ACTION_CONFIG_KEY,normalized);
- state.documentActionSettings=normalized;
- return normalized;
+ if(serializedSize>700000)throw new Error('El catálogo de documentos está alcanzando su límite seguro.');
+ await saveSetting(DOCUMENT_ACTION_CONFIG_KEY,normalized);state.documentActionSettings=normalized;return normalized;
 }
-function getFormatDocumentActions(formatId){
+function legacyFormatDocumentActions(format){
+ if(!format||!format.id)return [];
+ const schema=normaliseClinicalFormatSchema(format.schema||[]),settings=normalizeDocumentActionSettings(state.documentActionSettings),out=[];
+ const add=(id,fieldKeys,extra={})=>{const item=settings.catalog.find(x=>x.id===id);if(!item)return;out.push({...item,catalogId:id,buttonLabel:`Generar ${item.name}`,documentTitle:item.documentTitle,fieldKeys:[...new Set(fieldKeys)],includePatientIdentity:true,includeProfessionalSignature:true,showGroups:true,...extra});};
+ if(format.enable_prescription===true){
+  const keys=schema.filter(f=>f.include_in_prescription===true||f.document_destinations?.includes('prescription')).map(f=>f.key);
+  add('builtin_prescription',keys,{includeMedicationTable:true});
+ }
+ if(format.enable_labs===true){
+  const exact=new Set(['laboratorio_orden','laboratorio','plan_estudios','estudios','laboratorio_solicitados','estudios_solicitados']);
+  const keys=schema.filter(f=>f.include_in_labs_studies===true||f.document_destinations?.includes('labs_studies')||exact.has(String(f.key||''))).map(f=>f.key);
+  if(keys.length)add('builtin_labs',keys,{includeSomatometry:true});
+ }
+ if(format.enable_professional_plan===true){
+  const keys=schema.filter(f=>f.include_in_professional_plan===true).map(f=>f.key);
+  if(keys.length)add('builtin_professional_plan',keys);
+ }
+ return out;
+}
+function getFormatDocumentActions(formatId,format=null){
  if(!formatId)return [];
- const settings=normalizeDocumentActionSettings(state.documentActionSettings);
- const assigned=settings.formats[String(formatId)]||[];
+ const settings=normalizeDocumentActionSettings(state.documentActionSettings),hasSaved=Object.prototype.hasOwnProperty.call(settings.formats,String(formatId));
+ let assigned=hasSaved?[...(settings.formats[String(formatId)]||[])]:legacyFormatDocumentActions(format);
+ // Migrate settings v1: the old catalog stored custom actions only; legacy standard actions still lived on the format document.
+ if(hasSaved&&settings.version<2&&format){const legacy=legacyFormatDocumentActions(format);for(const item of legacy)if(!assigned.some(x=>x.catalogId===item.catalogId))assigned.push(item);}
  return assigned.map(config=>{
-  const item=settings.catalog.find(x=>x.id===config.catalogId);
-  if(!item||item.active===false)return null;
-  return {...item,...config,name:item.name,buttonLabel:config.buttonLabel||`Generar ${item.name}`,documentTitle:config.documentTitle||item.documentTitle||item.name};
- }).filter(x=>x&&x.fieldKeys.length>0);
+  const item=settings.catalog.find(x=>x.id===config.catalogId);if(!item||item.active===false)return null;
+  return {...item,...config,type:item.type||config.type||'custom',name:item.name,buttonLabel:config.buttonLabel||`Generar ${item.name}`,documentTitle:config.documentTitle||item.documentTitle||item.name};
+ }).filter(x=>x&&(x.fieldKeys.length>0||x.includeSomatometry===true||(x.type==='prescription'&&x.includeMedicationTable===true)));
 }
 function getDocumentActionUsage(catalogId){
  const formats=normalizeDocumentActionSettings(state.documentActionSettings).formats;
  return Object.values(formats).filter(items=>Array.isArray(items)&&items.some(x=>x.catalogId===catalogId)).length;
 }
 function renderDocumentActionCatalogPanel(){
- const settings=normalizeDocumentActionSettings(state.documentActionSettings);
- const active=settings.catalog.filter(x=>x.active!==false);
- return `<div class="panel"><div class="panel-head"><div><h3>Catálogo de documentos reutilizables</h3><p>Crea una acción una sola vez y después asígnala a tantos formatos como necesites. Cada formato conserva sus propios campos y textos.</p></div><div class="actions"><button class="btn primary" id="document-action-catalog-manage">＋ Administrar catálogo</button></div></div>${active.length?`<div class="document-action-catalog-grid">${active.map(item=>`<div class="document-action-catalog-item"><strong>${esc(item.name)}</strong><span>${esc(item.documentTitle)}</span><small>${esc(item.description||'Documento reutilizable')}</small></div>`).join('')}</div>`:'<div class="empty-state"><strong>Aún no hay documentos reutilizables</strong><p>Agrega, por ejemplo, una ficha de seguimiento, recomendaciones, constancia o informe.</p></div>'}</div>`;
+ const settings=normalizeDocumentActionSettings(state.documentActionSettings),active=settings.catalog.filter(x=>x.active!==false);
+ return `<div class="panel"><div class="panel-head"><div><h3>Catálogo general de generadores</h3><p>Crea un generador una sola vez y asígnalo a distintos formatos. Cada formato guarda sus propios campos, títulos y opciones.</p></div><div class="actions"><button class="btn primary" id="document-action-catalog-manage">＋ Administrar generadores</button></div></div>${active.length?`<div class="document-action-catalog-grid">${active.map(item=>`<div class="document-action-catalog-item"><strong>${esc(item.name)}</strong><span>${esc(item.documentTitle)}</span><small>${esc(item.type==='custom'?'Documento personalizado':item.type==='labs'?'Plantilla estándar · estudios':item.type==='prescription'?'Plantilla estándar · receta':'Plantilla estándar · plan')}</small></div>`).join('')}</div>`:''}</div>`;
 }
 function openDocumentActionCatalogManager(){
  if(state.user?.role!=='admin'){toast('Solo Administración puede modificar el catálogo.','warning');return;}
- const renderRows=()=>{
-  const items=normalizeDocumentActionSettings(state.documentActionSettings).catalog;
-  const rows=items.map(item=>`<div class="document-catalog-row"><div><strong>${esc(item.name)}</strong><small>${esc(item.documentTitle)} · ${getDocumentActionUsage(item.id)} formato(s) asignado(s)</small><p>${esc(item.description||'Sin descripción')}</p></div><div class="actions"><button type="button" class="btn small" data-doc-catalog-edit="${esc(item.id)}">Editar</button><button type="button" class="btn small danger" data-doc-catalog-delete="${esc(item.id)}" ${getDocumentActionUsage(item.id)>0?'disabled title="Retira primero esta acción de los formatos"':''}>Eliminar</button></div></div>`).join('');
-  return `<div class="document-catalog-list">${rows||'<div class="empty-state"><strong>Catálogo vacío</strong><p>Agrega tu primera acción reutilizable.</p></div>'}</div><div class="actions" style="margin-top:14px"><button type="button" class="btn primary" id="document-catalog-add">＋ Crear documento reutilizable</button></div>`;
- };
- openModal('Catálogo general de documentos',renderRows(),{size:'wide',buttons:[{action:'close',label:'Cerrar'}],afterOpen:root=>{
-  root.addEventListener('click',async e=>{
-   const edit=e.target.closest('[data-doc-catalog-edit]');
-   if(edit){openDocumentActionCatalogItemEditor(edit.dataset.docCatalogEdit);return;}
-   const del=e.target.closest('[data-doc-catalog-delete]');
-   if(del){await deleteDocumentActionCatalogItem(del.dataset.docCatalogDelete);const modalBody=$('.modal-body',root);if(modalBody)modalBody.innerHTML=renderRows();return;}
-   if(e.target.closest('#document-catalog-add'))openDocumentActionCatalogItemEditor('');
-  });
- }});
+ const renderRows=()=>{const items=normalizeDocumentActionSettings(state.documentActionSettings).catalog;const rows=items.map(item=>`<div class="document-catalog-row"><div><strong>${esc(item.name)} ${item.builtIn?'<span class="badge">Plantilla estándar</span>':''}</strong><small>${esc(item.documentTitle)} · ${getDocumentActionUsage(item.id)} formato(s) asignado(s)</small><p>${esc(item.description||'Sin descripción')}</p></div><div class="actions"><button type="button" class="btn small" data-doc-catalog-edit="${esc(item.id)}">Editar</button><button type="button" class="btn small danger" data-doc-catalog-delete="${esc(item.id)}" ${(item.builtIn||getDocumentActionUsage(item.id)>0)?'disabled title="Las plantillas estándar no se eliminan; retira las asignaciones para documentos personalizados"':''}>Eliminar</button></div></div>`).join('');return `<div class="document-catalog-list">${rows}</div><div class="actions" style="margin-top:14px"><button type="button" class="btn primary" id="document-catalog-add">＋ Crear generador personalizado</button></div>`;};
+ openModal('Catálogo general de generadores',renderRows(),{size:'wide',buttons:[{action:'close',label:'Cerrar'}],afterOpen:root=>{root.addEventListener('click',async e=>{const edit=e.target.closest('[data-doc-catalog-edit]');if(edit){openDocumentActionCatalogItemEditor(edit.dataset.docCatalogEdit);return;}const del=e.target.closest('[data-doc-catalog-delete]');if(del){await deleteDocumentActionCatalogItem(del.dataset.docCatalogDelete);const body=$('.modal-body',root);if(body)body.innerHTML=renderRows();return;}if(e.target.closest('#document-catalog-add'))openDocumentActionCatalogItemEditor('');});}});
 }
 function openDocumentActionCatalogItemEditor(itemId=''){
- const settings=normalizeDocumentActionSettings(state.documentActionSettings);
- const item=settings.catalog.find(x=>x.id===itemId)||null;
- openModal(item?'Editar documento reutilizable':'Nuevo documento reutilizable',`<div class="form-grid"><label class="form-field span-2"><span>Nombre de la acción *</span><input name="document_name" required maxlength="80" value="${esc(item?.name||'')}" placeholder="Ej. Ficha de seguimiento"></label><label class="form-field span-2"><span>Título que aparecerá en el documento *</span><input name="document_title" required maxlength="120" value="${esc(item?.documentTitle||'')}" placeholder="Ej. FICHA DE SEGUIMIENTO"></label><label class="form-field span-2"><span>Descripción / finalidad</span><textarea name="document_description" rows="2" maxlength="240" placeholder="Para qué se utilizará este documento">${esc(item?.description||'')}</textarea></label></div><div class="inline-note"><strong>Documento reutilizable</strong><span>Después podrás asignar esta acción a distintos formatos y elegir campos diferentes en cada uno. No modifica los campos ni el orden de ningún formato.</span></div>`,{size:'medium',buttons:[{action:'cancel',label:'Cancelar'},{action:'save',label:'Guardar documento',primary:true}],onAction:async(action,fd)=>{
-  if(action!=='save')return true;
-  const name=String(fd.get('document_name')||'').trim(),documentTitle=String(fd.get('document_title')||'').trim(),description=String(fd.get('document_description')||'').trim();
-  if(!name||!documentTitle){toast('Escribe el nombre de la acción y el título del documento.','warning');return false;}
-  const duplicate=settings.catalog.find(x=>x.id!==itemId&&x.name.toLocaleLowerCase('es-MX')===name.toLocaleLowerCase('es-MX'));
-  if(duplicate){toast('Ya existe una acción con ese nombre en el catálogo.','warning');return false;}
+ const settings=normalizeDocumentActionSettings(state.documentActionSettings),item=settings.catalog.find(x=>x.id===itemId)||null;
+ openModal(item?'Editar generador':'Crear generador reutilizable',`<div class="form-grid"><label class="form-field span-2"><span>Nombre del generador / botón *</span><input name="document_name" required maxlength="80" value="${esc(item?.name||'')}" placeholder="Ej. Ficha de seguimiento"></label><label class="form-field span-2"><span>Título del documento impreso *</span><input name="document_title" required maxlength="120" value="${esc(item?.documentTitle||'')}" placeholder="Ej. FICHA DE SEGUIMIENTO"></label><label class="form-field span-2"><span>Descripción / finalidad</span><textarea name="document_description" rows="2" maxlength="240">${esc(item?.description||'')}</textarea></label></div><div class="inline-note"><strong>Plantilla reutilizable</strong><span>La plantilla define el propósito y el nombre. Al asignarla a cada formato elegirás de manera independiente qué campos imprime; los formatos no comparten las selecciones.</span></div>`,{size:'medium',buttons:[{action:'cancel',label:'Cancelar'},{action:'save',label:'Guardar generador',primary:true}],onAction:async(action,fd)=>{
+  if(action!=='save')return true;const name=String(fd.get('document_name')||'').trim(),documentTitle=String(fd.get('document_title')||'').trim(),description=String(fd.get('document_description')||'').trim();
+  if(!name||!documentTitle){toast('Escribe el nombre del generador y el título del documento.','warning');return false;}
+  if(settings.catalog.some(x=>x.id!==itemId&&x.name.toLocaleLowerCase('es-MX')===name.toLocaleLowerCase('es-MX'))){toast('Ya existe un generador con ese nombre.','warning');return false;}
   const id=itemId||`doc_${slugify(name).slice(0,35)}_${crypto.randomUUID().slice(0,8)}`;
-  const nextItem={id,name,documentTitle,description,active:true,created_at:item?.created_at||nowIso(),updated_at:nowIso()};
+  const nextItem={id,type:item?.type||'custom',builtIn:item?.builtIn===true,name,documentTitle,description,active:true,created_at:item?.created_at||nowIso(),updated_at:nowIso()};
   const catalog=item?settings.catalog.map(x=>x.id===id?nextItem:x):[...settings.catalog,nextItem];
-  try{await saveDocumentActionSettings({...settings,catalog});toast(item?'Documento reutilizable actualizado.':'Documento reutilizable creado.');
-   if(state.view==='templates')await renderTemplates();
-   return true;
-  }catch(err){toast('No se pudo guardar el catálogo. '+friendlyError(err),'error',8000);return false;}
+  try{await saveDocumentActionSettings({...settings,catalog});toast(item?'Generador actualizado.':'Generador creado.');if(state.view==='templates')await renderTemplates();return true;}
+  catch(err){toast('No se pudo guardar el catálogo. '+friendlyError(err),'error',8000);return false;}
  }});
 }
 async function deleteDocumentActionCatalogItem(id){
- if(getDocumentActionUsage(id)>0){toast('No puedes eliminar esta acción mientras esté asignada a uno o varios formatos. Retírala primero de cada formato.','warning',8000);return;}
- if(!confirm('¿Eliminar este documento reutilizable del catálogo?'))return;
- try{const settings=normalizeDocumentActionSettings(state.documentActionSettings);await saveDocumentActionSettings({...settings,catalog:settings.catalog.filter(x=>x.id!==id)});toast('Documento eliminado del catálogo.');}
- catch(err){toast('No se pudo eliminar el documento. '+friendlyError(err),'error',8000);}
+ const settings=normalizeDocumentActionSettings(state.documentActionSettings),item=settings.catalog.find(x=>x.id===id);
+ if(item?.builtIn){toast('Las plantillas estándar no se eliminan. Puedes dejar de asignarlas a los formatos.','warning');return;}
+ if(getDocumentActionUsage(id)>0){toast('No puedes eliminar este generador mientras esté asignado a uno o varios formatos.','warning',8000);return;}
+ if(!confirm('¿Eliminar este generador del catálogo?'))return;
+ try{await saveDocumentActionSettings({...settings,catalog:settings.catalog.filter(x=>x.id!==id)});toast('Generador eliminado del catálogo.');}catch(err){toast('No se pudo eliminar el generador. '+friendlyError(err),'error',8000);}
 }
 function collectDocumentActionConfigsFromForm(fd,schema){
- const settings=normalizeDocumentActionSettings(state.documentActionSettings);
- const enabled=[...new Set(fd.getAll('doc_action_enabled').map(String))];
- const validKeys=new Set(schema.map(x=>x.key));
- const result=[];
+ const settings=normalizeDocumentActionSettings(state.documentActionSettings),enabled=[...new Set(fd.getAll('doc_action_enabled').map(String))],validKeys=new Set(schema.map(x=>x.key)),result=[];
  for(const catalogId of enabled){
-  const item=settings.catalog.find(x=>x.id===catalogId&&x.active!==false);
-  if(!item)continue;
+  const item=settings.catalog.find(x=>x.id===catalogId&&x.active!==false);if(!item)continue;
   const fieldKeys=[...new Set(fd.getAll(`doc_action_fields_${catalogId}`).map(String).filter(key=>validKeys.has(key)))];
-  const includePatientIdentity=true;
   const includeSomatometry=fd.get(`doc_action_somatometry_${catalogId}`)==='on';
-  if(!fieldKeys.length&&!includeSomatometry){throw new Error(`La acción “${item.name}” necesita al menos un campo del formato o somatometría para generar su documento.`);}
-  const buttonLabel=String(fd.get(`doc_action_label_${catalogId}`)||`Generar ${item.name}`).trim();
-  const documentTitle=String(fd.get(`doc_action_title_${catalogId}`)||item.documentTitle).trim();
-  if(!buttonLabel||buttonLabel.length>80)throw new Error(`El texto del botón de “${item.name}” debe tener entre 1 y 80 caracteres.`);
-  if(!documentTitle||documentTitle.length>120)throw new Error(`El título del documento de “${item.name}” debe tener entre 1 y 120 caracteres.`);
-  const defaultButtonLabel=`Generar ${item.name}`;
-  result.push({catalogId,
-   // Empty overrides inherit the reusable catalog name/title; explicit per-format text stays local.
-   buttonLabel:buttonLabel===defaultButtonLabel?'':buttonLabel,
-   documentTitle:documentTitle===item.documentTitle?'':documentTitle,
-   fieldKeys,includePatientIdentity,includeSomatometry,
-   includeProfessionalSignature:fd.get(`doc_action_signature_${catalogId}`)==='on',
-   showGroups:fd.get(`doc_action_groups_${catalogId}`)==='on'});
+  const includeMedicationTable=item.type==='prescription'&&fd.get(`doc_action_medication_table_${catalogId}`)==='on';
+  if(item.type==='labs'&&!fieldKeys.length){throw new Error(`El generador “${item.name}” necesita al menos un campo seleccionado para estudios.`);}
+  if(!fieldKeys.length&&!includeSomatometry&&!includeMedicationTable){throw new Error(`El generador “${item.name}” necesita al menos un campo o un bloque especial (medicamentos/somatometría).`);}
+  const buttonLabel=String(fd.get(`doc_action_label_${catalogId}`)||`Generar ${item.name}`).trim(),documentTitle=String(fd.get(`doc_action_title_${catalogId}`)||item.documentTitle).trim();
+  if(!buttonLabel||buttonLabel.length>80||!documentTitle||documentTitle.length>120)throw new Error(`Revisa el nombre del botón y el título del documento “${item.name}”.`);
+  result.push({catalogId,type:item.type,buttonLabel:buttonLabel===`Generar ${item.name}`?'':buttonLabel,documentTitle:documentTitle===item.documentTitle?'':documentTitle,fieldKeys,includePatientIdentity:true,includeMedicationTable,includeSomatometry,includeProfessionalSignature:fd.get(`doc_action_signature_${catalogId}`)==='on',showGroups:fd.get(`doc_action_groups_${catalogId}`)==='on'});
  }
  return result;
 }
-function readDocumentActionFormState(root){
- const form=$('#active-modal-form',root);if(!form)return [];
- const fd=new FormData(form),settings=normalizeDocumentActionSettings(state.documentActionSettings),enabled=fd.getAll('doc_action_enabled').map(String);
- return enabled.map(catalogId=>({catalogId,buttonLabel:String(fd.get(`doc_action_label_${catalogId}`)||''),documentTitle:String(fd.get(`doc_action_title_${catalogId}`)||''),fieldKeys:fd.getAll(`doc_action_fields_${catalogId}`).map(String),includePatientIdentity:true,includeSomatometry:fd.get(`doc_action_somatometry_${catalogId}`)==='on',includeProfessionalSignature:fd.get(`doc_action_signature_${catalogId}`)==='on',showGroups:fd.get(`doc_action_groups_${catalogId}`)==='on'}));
-}
-function renderFormatDocumentActionsPanel(formatId,schema,previous=[]) {
- const settings=normalizeDocumentActionSettings(state.documentActionSettings);
- const catalog=settings.catalog.filter(x=>x.active!==false);
- if(!catalog.length)return '<div class="inline-note"><strong>Sin acciones reutilizables</strong><span>Primero crea documentos en el catálogo general desde la pantalla de Formatos clínicos. Después podrás asignarlos a este formato.</span></div>';
- const configs=Array.isArray(previous)?previous:(settings.formats[String(formatId||'')]||[]);
+function readDocumentActionFormState(root){return captureDocumentActionPanel(root);}
+function renderFormatDocumentActionsPanel(formatId,schema,previous=[]){
+ const settings=normalizeDocumentActionSettings(state.documentActionSettings),catalog=settings.catalog.filter(x=>x.active!==false),configs=Array.isArray(previous)?previous:(settings.formats[String(formatId||'')]||[]);
+ if(!catalog.length)return '<div class="inline-note"><strong>Catálogo vacío</strong><span>Primero crea generadores desde el catálogo general.</span></div>';
  return `<div class="format-document-actions-list">${catalog.map(item=>{
-  const cfg=configs.find(x=>x.catalogId===item.id)||null;
-  return `<section class="format-document-action-card" data-format-doc-action="${esc(item.id)}"><label class="format-document-action-enable"><input type="checkbox" name="doc_action_enabled" value="${esc(item.id)}" ${cfg&&cfg.enabled!==false?'checked':''}><span><strong>${esc(item.name)}</strong><small>${esc(item.description||'Documento reutilizable')}</small></span></label><div class="form-grid two format-document-action-options"><label class="form-field"><span>Texto del botón para este formato</span><input name="doc_action_label_${esc(item.id)}" maxlength="80" value="${esc(cfg?.buttonLabel||`Generar ${item.name}`)}"></label><label class="form-field"><span>Título del documento</span><input name="doc_action_title_${esc(item.id)}" maxlength="120" value="${esc(cfg?.documentTitle||item.documentTitle)}"></label></div><div class="document-action-field-select"><strong>Campos que incluirá este documento</strong><div class="document-action-field-grid">${schema.map(field=>`<label class="document-action-field-option" data-doc-field-option><input type="checkbox" name="doc_action_fields_${esc(item.id)}" value="${esc(field.key)}" ${(cfg?.fieldKeys||[]).includes(field.key)?'checked':''}><span>${esc(field.label)}</span></label>`).join('')||'<small>Agrega campos al formato para poder seleccionarlos aquí.</small>'}</div></div><div class="document-action-include-options"><div class="document-action-field-option document-action-identity-required"><span>✓</span><span><strong>Ficha completa de identificación</strong><small>Se incluye siempre en todos los documentos.</small></span></div><label class="document-action-field-option"><input type="checkbox" name="doc_action_somatometry_${esc(item.id)}" ${cfg?.includeSomatometry===true?'checked':''}><span>Somatometría y signos vitales</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_signature_${esc(item.id)}" ${cfg?.includeProfessionalSignature!==false?'checked':''}><span>Firma del profesional</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_groups_${esc(item.id)}" ${cfg?.showGroups!==false?'checked':''}><span>Conservar secciones del formato</span></label></div></section>`;
+  const cfg=configs.find(x=>x.catalogId===item.id)||null,checked=!!cfg&&cfg.enabled!==false;
+  return `<section class="format-document-action-card" data-format-doc-action="${esc(item.id)}"><label class="format-document-action-enable"><input type="checkbox" name="doc_action_enabled" value="${esc(item.id)}" ${checked?'checked':''}><span><strong>${esc(item.name)}</strong><small>${esc(item.description||'Generador reutilizable')}${item.builtIn?' · Plantilla estándar':''}</small></span></label><div class="format-document-action-options form-grid two"><label class="form-field"><span>Texto del botón</span><input name="doc_action_label_${esc(item.id)}" maxlength="80" value="${esc(cfg?.buttonLabel||`Generar ${item.name}`)}"></label><label class="form-field"><span>Título impreso</span><input name="doc_action_title_${esc(item.id)}" maxlength="120" value="${esc(cfg?.documentTitle||item.documentTitle)}"></label></div><div class="document-action-field-select"><strong>Campos que incluirá este generador</strong><div class="document-action-field-grid">${schema.map(field=>`<label class="document-action-field-option"><input type="checkbox" name="doc_action_fields_${esc(item.id)}" value="${esc(field.key)}" ${(cfg?.fieldKeys||[]).includes(field.key)?'checked':''}><span>${esc(field.label)}</span></label>`).join('')||'<small>Agrega campos al formato primero.</small>'}</div></div><div class="document-action-include-options"><div class="document-action-field-option document-action-identity-required"><span>✓</span><span><strong>Identificación completa del paciente</strong><small>Se incluye siempre.</small></span></div>${item.type==='prescription'?`<label class="document-action-field-option"><input type="checkbox" name="doc_action_medication_table_${esc(item.id)}" ${cfg?.includeMedicationTable!==false?'checked':''}><span>Incluir tabla de medicamentos</span></label>`:''}<label class="document-action-field-option"><input type="checkbox" name="doc_action_somatometry_${esc(item.id)}" ${cfg?.includeSomatometry===true?'checked':''}><span>Somatometría y signos vitales</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_signature_${esc(item.id)}" ${cfg?.includeProfessionalSignature!==false?'checked':''}><span>Firma del profesional</span></label><label class="document-action-field-option"><input type="checkbox" name="doc_action_groups_${esc(item.id)}" ${cfg?.showGroups!==false?'checked':''}><span>Conservar secciones del formato</span></label></div></section>`;
  }).join('')}</div>`;
 }
+
 function formatGenerateButtonLabel(formatName){
  const name=String(formatName||'Documento').trim()||'Documento';
  return /^generar(?:\s|$)/i.test(name)?name:`Generar ${name}`;
@@ -1194,11 +1194,11 @@ function openNoteEditor(visit,patient,triage,existing,specialty,mode='full',edit
  const allDefinitions=formatSchema.length?formatSchema:(hasSelectedFormat?[]:getTemplateDefinitions(specialty));
  const formatName=String(format?.name||existing?.payload?.format_name||`Historia clínica · ${specialty}`);
  const formatId=String(format?.id||existing?.payload?.format_id||'');
- const enablePrescription=format?format.enable_prescription===true:(String(specialty||'').trim().toLocaleLowerCase('es-MX')==='medicina');
- const labsEnabled=format?format.enable_labs===true:isClinicalActionEnabled(specialty,'labs');
- const professionalPlanEnabled=format?.enable_professional_plan===true;
+ const savedActionSettings=normalizeDocumentActionSettings(state.documentActionSettings);const hasCurrentFormatActionConfig=Object.prototype.hasOwnProperty.call(savedActionSettings.formats,formatId);const hasHistoricalActions=Array.isArray(existing?.payload?.document_actions_snapshot)&&existing.payload.document_actions_snapshot.length>0;const customDocumentActions=hasHistoricalActions?existing.payload.document_actions_snapshot.map(item=>({...item,type:item.type||savedActionSettings.catalog.find(x=>x.id===item.catalogId)?.type||'custom'})):(hasCurrentFormatActionConfig?getFormatDocumentActions(formatId,format):(format?getFormatDocumentActions(formatId,format):[]));
+ const enablePrescription=customDocumentActions.some(x=>x.type==='prescription');
+ const labsEnabled=customDocumentActions.some(x=>x.type==='labs');
+ const professionalPlanEnabled=customDocumentActions.some(x=>x.type==='professional_plan');
  const formatActions=formatActionLabels(format,specialty);
- const savedActionSettings=normalizeDocumentActionSettings(state.documentActionSettings);const hasCurrentFormatActionConfig=Object.prototype.hasOwnProperty.call(savedActionSettings.formats,formatId);const customDocumentActions=hasCurrentFormatActionConfig?getFormatDocumentActions(formatId):(Array.isArray(existing?.payload?.document_actions_snapshot)?existing.payload.document_actions_snapshot:[]);
  const specialtyDefinitions=mode==='ambulatory'?allDefinitions.filter(f=>!['antecedentes_seleccionados','antecedentes_seleccionados_otro','antecedentes_heredofamiliares','antecedentes_gineco_obstetricos','otras_observaciones','alergias_seleccionadas','alergias_detalle'].includes(f.key)):allDefinitions;
  const specialtyFields=specialtyDefinitions.map(f=>[f.key,f.label]);
  const specialtyDefinitionMap=new Map(specialtyDefinitions.map(f=>[f.key,f]));
@@ -1215,7 +1215,7 @@ function openNoteEditor(visit,patient,triage,existing,specialty,mode='full',edit
 
  const savedMeds=Array.isArray(prior.medicamentos_receta)?prior.medicamentos_receta:[];
  const medicationRows=savedMeds.length?savedMeds:[{}];
- const isMedicineSpecialty=enablePrescription;
+ const isMedicineSpecialty=customDocumentActions.some(item=>item.type==='prescription'&&item.includeMedicationTable!==false);
  const medicationEditorHtml=isMedicineSpecialty?`<section class="rx-editor-section"><div class="rx-editor-head"><div><h3>Medicamentos de la receta</h3><p>Captura por separado medicamento, dosis, vía, frecuencia y duración.</p></div><button type="button" class="btn small" data-rx-add>＋ Agregar medicamento</button></div><div id="rx-editor-rows">${medicationRows.map(m=>prescriptionEditorRow(m)).join('')}</div></section>`:'';
  const recommendationsHtml=`<section class="rx-editor-section recommendations-section"><div class="rx-editor-head"><div><h3>Indicaciones y recomendaciones</h3><p>Incluye estudios solicitados y recomendaciones para el paciente.</p></div></div><label class="form-field">${esc(state.uiSettings?.clinicalLabels?.[specialty]?.laboratorio_orden||'Laboratorio / gabinete')}<textarea name="field_laboratorio_orden" rows="3" placeholder="Un estudio por línea…">${fieldVal(prior,'laboratorio_orden')||fieldVal(prior,'laboratorio')||fieldVal(prior,'estudios')}</textarea></label><label class="form-field">${esc(state.uiSettings?.clinicalLabels?.[specialty]?.otras_indicaciones_recomendaciones||'Otras indicaciones y recomendaciones')}<textarea name="field_otras_indicaciones_recomendaciones" rows="3" placeholder="Cuidados, recomendaciones, preparación y seguimiento…">${fieldVal(prior,'otras_indicaciones_recomendaciones')||fieldVal(prior,'indicaciones')}</textarea></label></section>`;
  const body=`<div class="profile-block"><div class="avatar">${esc(initials(patientName(patient)))}</div><div><h3>${esc(patientName(patient))}</h3><p>Folio BRIMA ${esc(shortId(visit.patient_id))} · ${esc(visit.service_specialty)} · ${esc(formatName)} · ${esc(statusLabel(visit.status))}</p><p class="autosave-indicator" id="note-autosave-status">${editExisting?'Edición de una nota existente · se conservará el mismo registro':'Guardado automático activado'}</p></div></div>${mode==='ambulatory'?'<div class="inline-note"><strong>Consulta ambulatoria</strong><span>Los antecedentes médicos se conservan en el expediente y no se muestran en este formulario.</span></div>':''}<details open><summary class="divider-label">Datos del paciente</summary><div class="form-grid">${identityFields}</div></details><details open><summary class="divider-label">Somatometría y signos vitales</summary><div class="form-grid">${triageFields}</div></details>${specialtyFieldsHtml}${medicationEditorHtml}<div class="inline-note warning-note" style="margin-top:15px"><strong>Responsabilidad profesional</strong><span>Revisa que la nota corresponda a la atención real. Las notas finalizadas quedan bloqueadas; las correcciones deben registrarse mediante adenda.</span></div>`;
@@ -1254,7 +1254,7 @@ function openNoteEditor(visit,patient,triage,existing,specialty,mode='full',edit
   const fieldLabels=Object.fromEntries(specialtyDefinitions.map(f=>[f.key,f.label]));
   const fieldOrder=[...specialtyDefinitions.map(f=>f.key),'medicamentos_receta'];
   const at=nowIso();
-  const payload=stripUndefinedDeep({note_type:noteType,format_id:formatId,format_name:formatName,format_schema_snapshot:specialtyDefinitions.map(f=>({...f,options:(f.options||[]).map(o=>({...o}))})),document_actions_snapshot:customDocumentActions.map(item=>({catalogId:item.catalogId,name:item.name,buttonLabel:item.buttonLabel,documentTitle:item.documentTitle,fieldKeys:[...(item.fieldKeys||[])],includePatientIdentity:true,includeSomatometry:item.includeSomatometry===true,includeProfessionalSignature:item.includeProfessionalSignature!==false,showGroups:item.showGroups!==false})),enable_prescription:enablePrescription,enable_labs:labsEnabled,enable_professional_plan:professionalPlanEnabled,action_labels:formatActions,fields:fieldsObj,field_labels:fieldLabels,field_groups:Object.fromEntries(specialtyDefinitions.map(f=>[f.key,f.group||'Historia clínica'])),field_order:fieldOrder,schema_version:3,note_mode:mode,history_backup:carriedHistory,patient_snapshot:{...patient},triage_snapshot:triagePayload,patient_id:visit.patient_id,visit_id:visit.id,specialty,professional:state.user.profile||{},author_username:state.user.username||state.user.email||'',generated_at:at,app_version:'0.3.19'});
+  const payload=stripUndefinedDeep({note_type:noteType,format_id:formatId,format_name:formatName,format_schema_snapshot:specialtyDefinitions.map(f=>({...f,options:(f.options||[]).map(o=>({...o}))})),document_actions_snapshot:customDocumentActions.map(item=>({catalogId:item.catalogId,type:item.type||'custom',name:item.name,buttonLabel:item.buttonLabel,documentTitle:item.documentTitle,fieldKeys:[...(item.fieldKeys||[])],includePatientIdentity:true,includeMedicationTable:item.includeMedicationTable===true,includeSomatometry:item.includeSomatometry===true,includeProfessionalSignature:item.includeProfessionalSignature!==false,showGroups:item.showGroups!==false})),enable_prescription:enablePrescription,enable_labs:labsEnabled,enable_professional_plan:professionalPlanEnabled,action_labels:formatActions,fields:fieldsObj,field_labels:fieldLabels,field_groups:Object.fromEntries(specialtyDefinitions.map(f=>[f.key,f.group||'Historia clínica'])),field_order:fieldOrder,schema_version:3,note_mode:mode,history_backup:carriedHistory,patient_snapshot:{...patient},triage_snapshot:triagePayload,patient_id:visit.patient_id,visit_id:visit.id,specialty,professional:state.user.profile||{},author_username:state.user.username||state.user.email||'',generated_at:at,app_version:'0.3.17-parche-5'});
   const data=stripUndefinedDeep({ownerUid:state.ownerUid,patient_id:visit.patient_id,visit_id:visit.id,kind:noteType,specialty,author_id:state.currentUser.uid,assigned_professional_id:visit.assigned_professional_id||state.currentUser.uid,interconsultation_request_id:String(visit.interconsultation_request_id||''),created_at:existing?.created_at||at,updated_at:at,finalized_at:status==='finalized'?at:'',status,payload,content_hash:''});
   const fingerprint=stableStringify(stripUndefinedDeep({fields:fieldsObj,history_backup:carriedHistory,note_type:noteType,format_id:formatId,mode}));
   return {id:draftId,data,fieldsObj:data.payload.fields,carriedHistory:data.payload.history_backup,noteType,fingerprint};
@@ -1275,7 +1275,7 @@ function openNoteEditor(visit,patient,triage,existing,specialty,mode='full',edit
  }
  openModal(`${formatName} · ${esc(specialty)}`,body,{
   size:'clinical',
-  buttons:editExisting?[{action:'cancel',label:'Cancelar'},{action:'edit_save',label:'Guardar cambios en este mismo documento',primary:true}]:[{action:'start',label:visit.status==='En atención'?'✓ Consulta iniciada':(state.uiSettings?.actionLabels?.start||'Iniciar consulta'),disabled:visit.status!=='Consulta'}, {action:'finalize',label:formatGenerateButtonLabel(formatName),primary:true},...(enablePrescription?[{action:'recipe',label:formatActions.prescription}]:[]),...(labsEnabled?[{action:'labs',label:formatActions.labs}]:[]),...(professionalPlanEnabled?[{action:'professional_plan',label:formatActions.professional_plan}]:[]),...customDocumentActions.map(item=>({action:`custom_document:${item.catalogId}`,label:item.buttonLabel})),{action:'finish_visit',label:state.uiSettings?.actionLabels?.finish_visit||'Finalizar consulta',disabled:visit.status!=='En atención'}],
+  buttons:editExisting?[{action:'cancel',label:'Cancelar'},{action:'edit_save',label:'Guardar cambios en este mismo documento',primary:true}]:[{action:'start',label:visit.status==='En atención'?'✓ Consulta iniciada':(state.uiSettings?.actionLabels?.start||'Iniciar consulta'),disabled:visit.status!=='Consulta'}, {action:'finalize',label:formatGenerateButtonLabel(formatName),primary:true},...customDocumentActions.map(item=>({action:`document_action:${item.catalogId}`,label:item.buttonLabel||`Generar ${item.name}`})),{action:'finish_visit',label:state.uiSettings?.actionLabels?.finish_visit||'Finalizar consulta',disabled:visit.status!=='En atención'}],
   afterOpen:root=>{
    editorForm=$('#active-modal-form',root);
    const allergyChecks=$$('input[name="allergy_option"]',root);
@@ -1319,10 +1319,7 @@ function openNoteEditor(visit,patient,triage,existing,specialty,mode='full',edit
     const fresh=await loadVisitDoc(visit.id);if(!fresh||fresh.status!=='En atención')throw new Error('La visita ya no figura como En atención. Actualiza la sala.');
     const closedAt=nowIso(),finishBatch=writeBatch(db);finishBatch.update(doc(db,'visitas',visit.id),{status:'Atendido',updated_at:closedAt,closed_at:closedAt,finished_by:state.currentUser.uid});addRoomSummaryToBatch(finishBatch,visit.id,{...fresh,status:'Atendido',updated_at:closedAt,closed_at:closedAt,finished_by:state.currentUser.uid});await finishBatch.commit();await writeAudit('FINALIZAR_CONSULTA',visit.patient_id,visit.id);suppressAutosave=true;closeModal('finish-visit');await loadQueue(true);await renderQueueContent();toast('Consulta finalizada. El paciente salió de “En consulta” y el profesional volvió a estar disponible.');return false;
    }
-   if(action==='recipe'){if(!enablePrescription){toast('La receta no está habilitada para este formato.','warning');return false;}const saved=await persistDraft(fd,{silent:true});openPrescriptionPrint(saved||{...built.data,id:draftId},patient);return false;}
-   if(action==='labs'){if(!labsEnabled){toast('La orden de laboratorios no está habilitada para este formato.','warning');return false;}const saved=await persistDraft(fd,{silent:true});openLabsPrint(saved||{...built.data,id:draftId},patient);return false;}
-   if(action==='professional_plan'){if(!professionalPlanEnabled){toast('El plan profesional no está habilitado para este formato.','warning');return false;}const saved=await persistDraft(fd,{silent:true});openProfessionalPlanPrint(saved||{...built.data,id:draftId},patient);return false;}
-   if(action.startsWith('custom_document:')){const actionId=action.slice('custom_document:'.length),config=customDocumentActions.find(x=>x.catalogId===actionId);if(!config){toast('La acción personalizada ya no está disponible. Actualiza BRIMA.','warning');return false;}const saved=await persistDraft(fd,{silent:true});openCustomDocumentPrint(saved||{...built.data,id:draftId},patient,config);return false;}
+   if(action.startsWith('document_action:')){const actionId=action.slice('document_action:'.length),config=customDocumentActions.find(x=>x.catalogId===actionId);if(!config){toast('El generador ya no está asignado a este formato. Actualiza BRIMA.','warning');return false;}const saved=await persistDraft(fd,{silent:true});openCustomDocumentPrint(saved||{...built.data,id:draftId},patient,config);return false;}
    if(action==='save_patient'){await persistDraft(fd,{silent:false});return false;}
    if(action!=='finalize')return false;
    if(visit.status!=='En atención'){toast('Primero pulsa “Iniciar consulta”.','warning');return false;}
@@ -1427,7 +1424,7 @@ function openNotePrint(encounter,eid,patient){
  const profLine=[prof.profession||payload.specialty||'',prof.cedula?`Cédula profesional: ${prof.cedula}`:'',prof.institution||'',prof.phone?`Teléfono: ${prof.phone}`:''].filter(Boolean).map(esc).join(' · ');
  const dateText=formatDate(encounter.finalized_at||encounter.updated_at||payload.generated_at);
  const doc=`<article id="print-note" class="clinical-document" ${clinicalPrintThemeAttr(payload.specialty||state.user?.profile?.specialty||'Medicina')}><header class="clinical-document-header"><div class="clinical-document-brand">${esc(prof.full_name||'Profesional responsable')}</div><div class="clinical-document-subtitle">${esc(prof.profession||payload.specialty||'Atención clínica')}</div><div class="clinical-document-profline">${profLine}</div></header><div class="clinical-document-titlebar"><strong>${esc(payload.format_name||'HISTORIA CLÍNICA')}</strong><span>Fecha: <b>${esc(dateText)}</b></span></div><section class="clinical-document-section"><h2>DATOS DE IDENTIFICACIÓN</h2><div class="clinical-patient-grid">${identificationHtml}</div></section>${historyRows?`<section class="clinical-document-section"><h2>ANTECEDENTES MÉDICOS</h2>${historyRows}</section>`:''}${printSomatometrySection(triage)}${noteHtml}${diagnosisHtml}${planHtml}${otherHtml}<footer class="clinical-document-signature"><strong>${esc(prof.full_name||'Profesional responsable')}</strong><small>${esc(prof.cedula?`Cédula profesional: ${prof.cedula}`:'')}</small><span>Firma del profesional</span></footer></article>`;
- openModal(`${payload.format_name||'Documento'} · Vista de impresión`,`<div class="historia-print-shell"><div class="historia-print-success"><span>✓</span> Documento generado correctamente</div><div class="historia-print-preview">${doc}</div><div class="historia-print-help">Documento “${esc(payload.format_name||'Historia clínica')}” listo para impresión. Revisa los datos antes de imprimir.</div></div>`,{size:'wide',buttons:[{action:'close',label:'Cerrar'},...(payload.enable_prescription?[{action:'recipe',label:formatActionLabels({action_labels:payload.action_labels},payload.specialty).prescription}]:[]),...(payload.enable_labs?[{action:'labs',label:formatActionLabels({action_labels:payload.action_labels},payload.specialty).labs}]:[]),...(payload.enable_professional_plan?[{action:'professional_plan',label:formatActionLabels({action_labels:payload.action_labels},payload.specialty).professional_plan}]:[]),...(Array.isArray(payload.document_actions_snapshot)?payload.document_actions_snapshot.map((item,index)=>({action:`custom_document:${index}`,label:item.buttonLabel||`Generar ${item.name||item.documentTitle||'documento'}`})):[]),{action:'download',label:'Descargar PDF'},{action:'saveas',label:'Guardar como…'},{action:'print',label:'Imprimir'}],onAction:async action=>{if(action==='recipe'){openPrescriptionPrint(encounter,patientData);return false;}if(action==='labs'){openLabsPrint(encounter,patientData);return false;}if(action==='professional_plan'){openProfessionalPlanPrint(encounter,patientData);return false;}if(action.startsWith('custom_document:')){const index=Number(action.slice('custom_document:'.length));const customAction=Array.isArray(payload.document_actions_snapshot)?payload.document_actions_snapshot[index]:null;if(customAction){openCustomDocumentPrint(encounter,patientData,customAction);}else toast('No se encontró la configuración histórica de este documento.','warning');return false;}if(['download','saveas','print'].includes(action)){if(action==='download')toast('En el cuadro de impresión selecciona “Guardar como PDF” para guardar el documento.','info',6500);else if(action==='saveas')toast('En el cuadro de impresión puedes elegir “Guardar como PDF” y seleccionar la ubicación.','info',6500);printClinicalDocument(doc);return false;}return true;}});
+ openModal(`${payload.format_name||'Documento'} · Vista de impresión`,`<div class="historia-print-shell"><div class="historia-print-success"><span>✓</span> Documento generado correctamente</div><div class="historia-print-preview">${doc}</div><div class="historia-print-help">Documento “${esc(payload.format_name||'Historia clínica')}” listo para impresión. Revisa los datos antes de imprimir.</div></div>`,{size:'wide',buttons:[{action:'close',label:'Cerrar'},...(Array.isArray(payload.document_actions_snapshot)&&payload.document_actions_snapshot.length?payload.document_actions_snapshot.map((item,index)=>({action:`document_action_snapshot:${index}`,label:item.buttonLabel||`Generar ${item.name||item.documentTitle||'documento'}`})):[...(payload.enable_prescription?[{action:'recipe',label:formatActionLabels({action_labels:payload.action_labels},payload.specialty).prescription}]:[]),...(payload.enable_labs?[{action:'labs',label:formatActionLabels({action_labels:payload.action_labels},payload.specialty).labs}]:[]),...(payload.enable_professional_plan?[{action:'professional_plan',label:formatActionLabels({action_labels:payload.action_labels},payload.specialty).professional_plan}]:[])]),{action:'download',label:'Descargar PDF'},{action:'saveas',label:'Guardar como…'},{action:'print',label:'Imprimir'}],onAction:async action=>{if(action.startsWith('document_action_snapshot:')){const index=Number(action.slice('document_action_snapshot:'.length));const config=payload.document_actions_snapshot?.[index];if(config)openCustomDocumentPrint(encounter,patientData,config);else toast('No se encontró la configuración histórica de este generador.','warning');return false;}if(action==='recipe'){openPrescriptionPrint(encounter,patientData);return false;}if(action==='labs'){openLabsPrint(encounter,patientData);return false;}if(action==='professional_plan'){openProfessionalPlanPrint(encounter,patientData);return false;}if(['download','saveas','print'].includes(action)){if(action==='download')toast('En el cuadro de impresión selecciona “Guardar como PDF” para guardar el documento.','info',6500);else if(action==='saveas')toast('En el cuadro de impresión puedes elegir “Guardar como PDF” y seleccionar la ubicación.','info',6500);printClinicalDocument(doc);return false;}return true;}});
 }
 function customDocumentValueHtml(value){
  if(value&&typeof value==='object'&&value.meals)return renderNutritionPlanTable(value);
@@ -1495,25 +1492,31 @@ function customDocumentPatientRows(patientData,snapshot=null){
 
 function openCustomDocumentPrint(encounter,patient,actionConfig){
  const p=encounter?.payload||{},fields=p.fields||{},schema=orderedFormatSchema(p),professional=p.professional||{},triage=p.triage_snapshot||{};
- const selectedKeys=new Set(Array.isArray(actionConfig?.fieldKeys)?actionConfig.fieldKeys:[]),usedFieldKeys=new Set();
- const entries=schema.filter(field=>{const key=String(field?.key||'');if(!key||!selectedKeys.has(key)||usedFieldKeys.has(key)||!hasClinicalFieldValue(fields[key]))return false;usedFieldKeys.add(key);return true;});
- const patientData=normalizePatientPrintData(patient,p.patient_snapshot);
- const includePatient=true,includeSomatometry=actionConfig?.includeSomatometry===true,includeSignature=actionConfig?.includeProfessionalSignature!==false,showGroups=actionConfig?.showGroups!==false;
- if(!entries.length&&!includeSomatometry){toast('Este documento no tiene campos capturados ni somatometría seleccionada. Revisa los campos en Administración.','warning',8000);return;}
+ const selectedKeys=new Set(Array.isArray(actionConfig?.fieldKeys)?actionConfig.fieldKeys:[]),seen=new Set();
+ const entries=schema.filter(field=>{const key=String(field?.key||'');if(!key||!selectedKeys.has(key)||seen.has(key)||!hasClinicalFieldValue(fields[key]))return false;seen.add(key);return true;});
+ const meds=actionConfig?.type==='prescription'&&actionConfig?.includeMedicationTable===true&&Array.isArray(fields.medicamentos_receta)?fields.medicamentos_receta.filter(m=>String(m?.name||m?.medicamento||'').trim()):[];
+ const includeSomatometry=actionConfig?.includeSomatometry===true,includeSignature=actionConfig?.includeProfessionalSignature!==false,showGroups=actionConfig?.showGroups!==false;
+ if(!entries.length&&!includeSomatometry&&!meds.length){toast('Este generador no tiene campos capturados. Revisa su selección en Administración o completa la información durante la consulta.','warning',8000);return;}
+ const type=actionConfig?.type||'custom',title=String(actionConfig?.documentTitle||actionConfig?.name||'DOCUMENTO').trim();
+ const rowHtml=field=>`<div class="clinical-document-row"><strong>${esc(field.label||field.key)}</strong>${customDocumentValueHtml(fields[field.key])}</div>`;
  let content='';
- if(showGroups){
-  const grouped=new Map();for(const field of entries){const group=String(field.group||'Documento');if(!grouped.has(group))grouped.set(group,[]);grouped.get(group).push(field);}
-  content=Array.from(grouped.entries()).map(([group,items])=>`<section class="clinical-document-section"><h2>${esc(group)}</h2>${items.map(field=>`<div class="clinical-document-row"><strong>${esc(field.label||field.key)}</strong>${customDocumentValueHtml(fields[field.key])}</div>`).join('')}</section>`).join('');
+ if(type==='labs'){
+  content=entries.length?`<section class="clinical-document-section"><h2>ESTUDIOS SOLICITADOS</h2>${entries.map(rowHtml).join('')}</section>`:'';
+ }else if(type==='prescription'){
+  const medicationHtml=meds.length?`<section class="clinical-document-section"><h2>MEDICAMENTOS PRESCRITOS</h2><table class="clinical-document-table"><thead><tr><th>Medicamento</th><th>Dosis</th><th>Vía</th><th>Frecuencia</th><th>Duración</th><th>Indicaciones</th></tr></thead><tbody>${meds.map(m=>`<tr><td>${esc(m.name||m.medicamento||'')}</td><td>${esc(m.dose||m.dosis||'—')}</td><td>${esc(m.route||m.via||'—')}</td><td>${esc(m.frequency||m.frecuencia||'—')}</td><td>${esc(m.duration||m.duracion||'—')}</td><td>${esc(m.instructions||m.indicaciones||'—')}</td></tr>`).join('')}</tbody></table></section>`:'';
+  const selectedHtml=entries.length?`<section class="clinical-document-section"><h2>INDICACIONES Y DATOS DE LA PRESCRIPCIÓN</h2>${entries.map(rowHtml).join('')}</section>`:'';
+  content=medicationHtml+selectedHtml;
  }else{
-  content=`<section class="clinical-document-section"><h2>INFORMACIÓN</h2>${entries.map(field=>`<div class="clinical-document-row"><strong>${esc(field.label||field.key)}</strong>${customDocumentValueHtml(fields[field.key])}</div>`).join('')}</section>`;
+  if(showGroups){const grouped=new Map();for(const field of entries){const group=String(field.group||'Documento');if(!grouped.has(group))grouped.set(group,[]);grouped.get(group).push(field);}content=Array.from(grouped.entries()).map(([group,items])=>`<section class="clinical-document-section"><h2>${esc(group)}</h2>${items.map(rowHtml).join('')}</section>`).join('');}
+  else content=entries.length?`<section class="clinical-document-section"><h2>INFORMACIÓN</h2>${entries.map(rowHtml).join('')}</section>`:'';
  }
- const documentTitle=String(actionConfig?.documentTitle||actionConfig?.name||'DOCUMENTO').trim();
+ const patientData=normalizePatientPrintData(patient,p.patient_snapshot);
  const profLine=[professional.profession||p.specialty||'',professional.cedula?`Cédula profesional: ${professional.cedula}`:'',professional.institution||'',professional.phone?`Teléfono: ${professional.phone}`:''].filter(Boolean).map(esc).join(' · ');
- const identity=includePatient?`<section class="clinical-document-section"><h2>DATOS DE IDENTIFICACIÓN</h2><div class="clinical-patient-grid">${renderPatientIdentificationRows(patientData)}</div></section>`:'';
+ const identity=`<section class="clinical-document-section"><h2>DATOS DE IDENTIFICACIÓN</h2><div class="clinical-patient-grid">${renderPatientIdentificationRows(patientData)}</div></section>`;
  const soma=includeSomatometry?printSomatometrySection(triage):'';
  const signature=includeSignature?`<footer class="clinical-document-signature"><strong>${esc(professional.full_name||'Profesional responsable')}</strong><small>${esc(professional.cedula?`Cédula profesional: ${professional.cedula}`:'')}</small><span>Firma del profesional</span></footer>`:'';
- const docHtml=`<article id="print-note" class="clinical-document" ${clinicalPrintThemeAttr(p.specialty||state.user?.profile?.specialty||'Medicina')}><header class="clinical-document-header"><div class="clinical-document-brand">${esc(professional.full_name||'Profesional responsable')}</div><div class="clinical-document-subtitle">${esc(professional.profession||p.specialty||'Atención clínica')}</div><div class="clinical-document-profline">${profLine}</div></header><div class="clinical-document-titlebar"><strong>${esc(documentTitle)}</strong><span>Fecha: <b>${esc(formatDate(encounter?.finalized_at||encounter?.updated_at||p.generated_at))}</b></span></div>${identity}${soma}${content}${signature}</article>`;
- openModal(`${documentTitle} · Vista previa`,`<div class="historia-print-shell"><div class="historia-print-preview">${docHtml}</div><div class="historia-print-help">Documento reutilizable · ${esc(actionConfig?.buttonLabel||'Generación personalizada')}.</div></div>`,{size:'wide',buttons:[{action:'close',label:'Cerrar'},{action:'print',label:'Imprimir / guardar PDF',primary:true}],onAction:async action=>{if(action==='print'){printClinicalDocument(docHtml);return false;}return true;}});
+ const docHtml=`<article id="print-note" class="clinical-document" ${clinicalPrintThemeAttr(p.specialty||state.user?.profile?.specialty||'Medicina')}><header class="clinical-document-header"><div class="clinical-document-brand">${esc(professional.full_name||'Profesional responsable')}</div><div class="clinical-document-subtitle">${esc(professional.profession||p.specialty||'Atención clínica')}</div><div class="clinical-document-profline">${profLine}</div></header><div class="clinical-document-titlebar"><strong>${esc(title)}</strong><span>Fecha: <b>${esc(formatDate(encounter?.finalized_at||encounter?.updated_at||p.generated_at))}</b></span></div>${identity}${soma}${content}${signature}</article>`;
+ openModal(`${title} · Vista previa`,`<div class="historia-print-shell"><div class="historia-print-preview">${docHtml}</div><div class="historia-print-help">Generador: ${esc(actionConfig?.buttonLabel||actionConfig?.name||title)}.</div></div>`,{size:'wide',buttons:[{action:'close',label:'Cerrar'},{action:'print',label:'Imprimir / guardar PDF',primary:true}],onAction:async action=>{if(action==='print'){printClinicalDocument(docHtml);return false;}return true;}});
 }
 
 function openPrescriptionPrint(encounter,patient){
@@ -1753,11 +1756,12 @@ async function startSharedConsultation(patientId){try{const grantRef=doc(db,'pac
 function captureDocumentActionPanel(root){
  const panel=$('#format-document-actions-panel',root);if(!panel)return [];
  return $$('.format-document-action-card',panel).map(card=>{
-  const id=card.dataset.formatDocAction||'';
+  const id=card.dataset.formatDocAction||'',settings=normalizeDocumentActionSettings(state.documentActionSettings),item=settings.catalog.find(x=>x.id===id);
   const get=name=>Array.from(card.querySelectorAll('[name]')).find(x=>x.name===name)||null;
-  return {catalogId:id,enabled:!!get('doc_action_enabled')?.checked,buttonLabel:String(get(`doc_action_label_${id}`)?.value||''),documentTitle:String(get(`doc_action_title_${id}`)?.value||''),fieldKeys:$$(`[name="doc_action_fields_${id}"]:checked`,card).map(x=>x.value),includePatientIdentity:true,includeSomatometry:!!get(`doc_action_somatometry_${id}`)?.checked,includeProfessionalSignature:!!get(`doc_action_signature_${id}`)?.checked,showGroups:!!get(`doc_action_groups_${id}`)?.checked};
+  return {catalogId:id,type:item?.type||'custom',enabled:!!get('doc_action_enabled')?.checked,buttonLabel:String(get(`doc_action_label_${id}`)?.value||''),documentTitle:String(get(`doc_action_title_${id}`)?.value||''),fieldKeys:$$(`[name="doc_action_fields_${id}"]:checked`,card).map(x=>x.value),includePatientIdentity:true,includeMedicationTable:get(`doc_action_medication_table_${id}`)?.checked===true,includeSomatometry:!!get(`doc_action_somatometry_${id}`)?.checked,includeProfessionalSignature:!!get(`doc_action_signature_${id}`)?.checked,showGroups:!!get(`doc_action_groups_${id}`)?.checked};
  });
 }
+
 async function renderTemplates(){
  if(state.user?.role!=='admin')return;
  await loadProfessionals(true);
@@ -1786,21 +1790,16 @@ function formatAssignmentChecks(format){
 function openClinicalFormatEditor(format=null){
  if(state.user?.role!=='admin'){toast('Solo Administración puede crear o editar formatos.','warning');return;}
  const isNew=!format,source=normaliseClinicalFormatSchema(format?.schema||[]),name=String(format?.name||''),specialty=String(format?.specialty||'Medicina');
- const existingDocActions=normalizeDocumentActionSettings(state.documentActionSettings).formats[String(format?.id||'')]||[];
- const body=`<div class="form-grid two"><label class="form-field span-2"><span>NOMBRE DEL FORMATO *</span><input name="format_name" required maxlength="120" value="${esc(name)}" placeholder="Ej. Certificado médico, Carta de buena salud"></label><label class="form-field"><span>Especialidad *</span><input name="format_specialty" list="brima-specialty-options" required maxlength="80" value="${esc(specialty)}" placeholder="Ej. Ginecología"><small>Escribe una especialidad nueva o elige una existente.</small>${specialtyDatalist()}</label><label class="form-field"><span>Descripción / uso</span><input name="format_description" maxlength="240" value="${esc(format?.description||'')}" placeholder="Para qué se utiliza este documento"></label><div class="form-field span-2"><label>Asignar a profesionales (opcional)</label><small>Marca manualmente uno o varios profesionales. Solo ellos podrán elegir este formato al abrir una atención. Puedes asignarlo después.</small>${formatAssignmentChecks(format)}</div></div><div class="divider-label">Acciones estándar de este formato</div><p class="hint">Estas acciones mantienen sus generadores especializados. Si no las activas, no aparecerán en la consulta.</p><div class="form-grid two format-action-settings"><div class="form-field"><label class="check-label"><input type="checkbox" name="format_enable_prescription" ${format?.enable_prescription?'checked':''}> Mostrar generador de receta / medicamentos</label><label class="form-field"><span>Texto del botón</span><input name="format_action_label_prescription" maxlength="80" value="${esc(formatActionLabels(format, specialty).prescription)}"></label></div><div class="form-field"><label class="check-label"><input type="checkbox" name="format_enable_labs" ${format?.enable_labs?'checked':''}> Mostrar generador de orden de laboratorios / gabinete</label><label class="form-field"><span>Texto del botón</span><input name="format_action_label_labs" maxlength="80" value="${esc(formatActionLabels(format, specialty).labs)}"></label></div><div class="form-field"><label class="check-label"><input type="checkbox" name="format_enable_professional_plan" ${format?.enable_professional_plan?'checked':''}> Mostrar generador de plan profesional</label><label class="form-field"><span>Texto del botón</span><input name="format_action_label_professional_plan" maxlength="80" value="${esc(formatActionLabels(format, specialty).professional_plan)}"></label></div></div><div class="divider-label">Documentos personalizados reutilizables</div><p class="hint">Asigna documentos creados en el catálogo general. Cada formato conserva su propia selección de campos, texto del botón y opciones de impresión. No se altera el orden ni las claves de los campos del formato.</p><div id="format-document-actions-panel">${renderFormatDocumentActionsPanel(format?.id,source,existingDocActions.map(x=>({...x,enabled:true})))}</div><div class="divider-label">Campos del documento</div><p class="hint">Los campos y su orden se conservan tal como los configures. Los datos de identificación y la somatometría se pueden agregar por separado a cada documento personalizado.</p><div id="clinical-format-builder-list" class="template-builder-list">${source.map((f,i)=>templateBuilderRow(f,i,true)).join('')}</div><div class="actions"><button type="button" class="btn" id="clinical-format-builder-add">＋ Agregar campo</button></div>`;
+ const existingDocActions=getFormatDocumentActions(String(format?.id||''),format||null);
+ const body=`<div class="form-grid two"><label class="form-field span-2"><span>NOMBRE DEL FORMATO *</span><input name="format_name" required maxlength="120" value="${esc(name)}" placeholder="Ej. Certificado médico, Carta de buena salud"></label><label class="form-field"><span>Especialidad *</span><input name="format_specialty" list="brima-specialty-options" required maxlength="80" value="${esc(specialty)}" placeholder="Ej. Ginecología"><small>Escribe una especialidad nueva o elige una existente.</small>${specialtyDatalist()}</label><label class="form-field"><span>Descripción / uso</span><input name="format_description" maxlength="240" value="${esc(format?.description||'')}" placeholder="Para qué se utiliza este documento"></label><div class="form-field span-2"><label>Asignar a profesionales (opcional)</label><small>Marca manualmente uno o varios profesionales. Puedes guardar el formato sin asignarlo todavía.</small>${formatAssignmentChecks(format)}</div></div><div class="divider-label">Generadores de documentos para este formato</div><p class="hint">Activa cada generador y selecciona sus campos. La selección es independiente por formato. Puedes crear generadores nuevos en el catálogo general y reutilizarlos aquí.</p><div id="format-document-actions-panel">${renderFormatDocumentActionsPanel(format?.id,source,existingDocActions.map(x=>({...x,enabled:true})))}</div><div class="divider-label">Campos del formato clínico</div><p class="hint">Se conservan tus claves técnicas y el orden que definas. La identificación completa del paciente se agrega automáticamente a todos los documentos.</p><div id="clinical-format-builder-list" class="template-builder-list">${source.map((f,i)=>templateBuilderRow(f,i,true)).join('')}</div><div class="actions"><button type="button" class="btn" id="clinical-format-builder-add">＋ Agregar campo</button><button type="button" class="btn ghost" id="clinical-format-open-catalog">Administrar catálogo de generadores</button></div>`;
  openModal(isNew?'Crear nuevo formato':'Editar formato clínico',body,{size:'wide',buttons:[{action:'cancel',label:'Cancelar'},{action:'save',label:isNew?'Crear formato':'Guardar cambios',primary:true}],afterOpen:root=>{
-  const list=$('#clinical-format-builder-list',root),add=$('#clinical-format-builder-add',root),panel=$('#format-document-actions-panel',root),specialtyInput=$('input[name="format_specialty"]',root),planLabelInput=$('input[name="format_action_label_professional_plan"]',root);
-  let customPlanLabel=!!(format?.action_labels?.professional_plan&&format.action_labels.professional_plan!==defaultFormatActionLabels(specialty).professional_plan);
-  const refreshDocActions=()=>{
-   const previous=captureDocumentActionPanel(root);
-   const schemaNow=$$('[data-schema-row]',list).map(row=>({key:String($('input[name="schema_key"]',row)?.value||''),label:String($('input[name="schema_label"]',row)?.value||'')})).filter(x=>x.key);
-   panel.innerHTML=renderFormatDocumentActionsPanel(format?.id,schemaNow,previous);
-  };
-  specialtyInput?.addEventListener('change',()=>{if(!customPlanLabel&&planLabelInput)planLabelInput.value=defaultFormatActionLabels(specialtyInput.value).professional_plan;});
-  planLabelInput?.addEventListener('input',()=>{customPlanLabel=true;});
-  add.onclick=()=>{const index=$$('[data-schema-row]',list).length+1;const key=`campo_${slugify($('#active-modal-form [name="format_name"]',root)?.value||$('#active-modal-form [name="format_specialty"]',root)?.value||'formato')}_${crypto.randomUUID().slice(0,8)}`;list.insertAdjacentHTML('beforeend',templateBuilderRow({key,label:'Nuevo campo',group:'Documento',type:'textarea',icon:'📝',options:[],required:false,placeholder:''},index-1,true));refreshDocActions();};
-  list.addEventListener('click',e=>{const row=e.target.closest('[data-schema-row]');if(!row)return;if(e.target.closest('[data-schema-remove]')){row.remove();refreshDocActions();}else if(e.target.closest('[data-schema-up]')){const prev=row.previousElementSibling;if(prev)list.insertBefore(row,prev);}else if(e.target.closest('[data-schema-down]')){const next=row.nextElementSibling;if(next)list.insertBefore(next,row);}});
-  list.addEventListener('change',e=>{const row=e.target.closest('[data-schema-row]');if(!row)return;if(e.target.matches('[data-schema-required]')){const hidden=$('input[name="schema_required"]',row);if(hidden)hidden.value=e.target.checked?'1':'0';}if(e.target.matches('[data-schema-plan-include]')){const hidden=$('input[name="schema_include_plan"]',row);if(hidden)hidden.value=e.target.checked?'1':'0';}if(e.target.matches('[data-schema-labs-summary]')){const hidden=$('input[name="schema_include_labs_summary"]',row);if(hidden)hidden.value=e.target.checked?'1':'0';}if(e.target.matches('[data-schema-prescription]')){const hidden=$('input[name="schema_include_prescription"]',row);if(hidden)hidden.value=e.target.checked?'1':'0';}if(e.target.matches('[name="schema_label"]'))refreshDocActions();});
+  const list=$('#clinical-format-builder-list',root),add=$('#clinical-format-builder-add',root),panel=$('#format-document-actions-panel',root);
+  const refreshDocActions=()=>{const previous=captureDocumentActionPanel(root);const schemaNow=$$('[data-schema-row]',list).map(row=>({key:String($('input[name="schema_key"]',row)?.value||''),label:String($('input[name="schema_label"]',row)?.value||''),group:String($('input[name="schema_group"]',row)?.value||'Documento')})).filter(x=>x.key);panel.innerHTML=renderFormatDocumentActionsPanel(format?.id,schemaNow,previous);};
+  add.onclick=()=>{const index=$$('[data-schema-row]',list).length+1,key=`campo_${slugify($('#active-modal-form [name="format_name"]',root)?.value||$('#active-modal-form [name="format_specialty"]',root)?.value||'formato')}_${crypto.randomUUID().slice(0,8)}`;list.insertAdjacentHTML('beforeend',templateBuilderRow({key,label:'Nuevo campo',group:'Documento',type:'textarea',icon:'📝',options:[],required:false,placeholder:''},index-1,true));refreshDocActions();};
+  $('#clinical-format-open-catalog',root).onclick=()=>openDocumentActionCatalogManager();
+  list.addEventListener('click',e=>{const row=e.target.closest('[data-schema-row]');if(!row)return;if(e.target.closest('[data-schema-remove]')){row.remove();refreshDocActions();}else if(e.target.closest('[data-schema-up]')){const prev=row.previousElementSibling;if(prev){list.insertBefore(row,prev);refreshDocActions();}}else if(e.target.closest('[data-schema-down]')){const next=row.nextElementSibling;if(next){list.insertBefore(next,row);refreshDocActions();}}});
+  list.addEventListener('input',e=>{if(e.target.matches('[name="schema_label"],[name="schema_group"]'))refreshDocActions();});
+  list.addEventListener('change',e=>{const row=e.target.closest('[data-schema-row]');if(!row)return;if(e.target.matches('[data-schema-required]')){const hidden=$('input[name="schema_required"]',row);if(hidden)hidden.value=e.target.checked?'1':'0';}});
  },onAction:async(action,fd)=>{
   if(action!=='save')return true;
   const formatName=String(fd.get('format_name')||'').trim(),formatSpecialty=String(fd.get('format_specialty')||'').trim(),description=String(fd.get('format_description')||'').trim(),assigned=fd.getAll('format_professional').map(String).filter(Boolean);
@@ -1809,28 +1808,24 @@ function openClinicalFormatEditor(format=null){
   if(!keys.length){toast('Agrega al menos un campo al formato.','warning');return false;}if(keys.length>100){toast('Un formato no puede tener más de 100 campos.','warning');return false;}
   const schema=[],seen=new Set();
   for(let i=0;i<keys.length;i++){
-   const key=keys[i].trim(),label=labels[i].trim();if(!key||!label){toast('Todos los campos deben tener nombre.','warning');return false;}if(seen.has(key)){toast(`La clave ${key} está duplicada.`, 'warning');return false;}seen.add(key);
+   const key=keys[i].trim(),label=labels[i].trim();if(!key||!label){toast('Todos los campos deben tener nombre.','warning');return false;}if(seen.has(key)){toast(`La clave ${key} está duplicada.`,'warning');return false;}seen.add(key);
    const opts=optionTexts[i].split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>{const ix=line.indexOf('|');return ix>=0?{icon:line.slice(0,ix).trim()||'🔹',label:line.slice(ix+1).trim()}:{icon:'🔹',label:line};}).filter(o=>o.label);
-   if(['choice','chips','foodfreq'].includes(types[i])&&!opts.length){toast(`El campo “${label}” usa botones, pero no tiene opciones. Agrega al menos una opción o cambia el tipo de respuesta.`, 'warning');return false;}
-   const min=Number(mins[i]||0),max=Number(maxs[i]||10);if(types[i]==='scale'&&(!Number.isFinite(min)||!Number.isFinite(max)||max<=min)){toast(`La escala “${label}” debe tener un máximo mayor que el mínimo.`, 'warning');return false;}
+   if(['choice','chips','foodfreq'].includes(types[i])&&!opts.length){toast(`El campo “${label}” usa botones, pero no tiene opciones. Agrega al menos una opción o cambia el tipo de respuesta.`,'warning');return false;}
+   const min=Number(mins[i]||0),max=Number(maxs[i]||10);if(types[i]==='scale'&&(!Number.isFinite(min)||!Number.isFinite(max)||max<=min)){toast(`La escala “${label}” debe tener un máximo mayor que el mínimo.`,'warning');return false;}
+   // Legacy flags are retained as hidden compatibility metadata; the new UI no longer uses them for routing.
    schema.push({key,label,group:groups[i].trim()||'Documento',type:types[i],icon:icons[i].trim()||'📝',placeholder:placeholders[i].trim(),options:opts,required:required[i]==='1',include_in_professional_plan:includePlan[i]==='1',include_in_labs_summary:includeLabsSummary[i]==='1',include_in_prescription:includePrescription[i]==='1',document_destinations:[...(includeLabsSummary[i]==='1'?['labs_summary']:[]),...(includePrescription[i]==='1'?['prescription']:[])],min,max});
   }
   let documentActions;try{documentActions=collectDocumentActionConfigsFromForm(fd,schema);}catch(err){toast(err.message,'warning',8000);return false;}
-  const seenAssigned=new Set();for(const uid of assigned){if(!seenAssigned.has(uid))seenAssigned.add(uid);}
-  const clinicians=new Set((state.professionals||[]).filter(p=>p.role==='clinician'&&p.active!==false).map(p=>p.id));if([...seenAssigned].some(uid=>!clinicians.has(uid))){toast('Uno de los profesionales seleccionados ya no está activo. Actualiza la pantalla y vuelve a asignar.','warning');return false;}
-  const duplicate=(state.clinicalFormats||[]).find(f=>f.id!==format?.id&&String(f.name||'').trim().toLocaleLowerCase('es-MX')===formatName.toLocaleLowerCase('es-MX')&&String(f.specialty||'').trim().toLocaleLowerCase('es-MX')===formatSpecialty.toLocaleLowerCase('es-MX')&&(f.assigned_professional_ids||[]).some(uid=>seenAssigned.has(uid)));if(duplicate){toast('Ese profesional ya tiene asignado otro formato con el mismo nombre y especialidad. Cambia el nombre para que pueda distinguirlos al abrir una atención.','warning');return false;}
-  const enableLabs=fd.get('format_enable_labs')==='on',enableProfessionalPlan=fd.get('format_enable_professional_plan')==='on';
-  if(enableLabs&&!schema.some(isLaboratoryField)){toast('Para habilitar la orden de laboratorios, agrega al formato al menos un campo cuyo nombre o sección identifique laboratorio, gabinete, estudios o pruebas.','warning',9000);return false;}
-  if(enableProfessionalPlan&&!schema.some(field=>field.include_in_professional_plan)){toast('Para habilitar el plan profesional, marca al menos un campo en “Incluir este campo al generar el plan profesional”.','warning',9000);return false;}
-  const actionLabels={prescription:String(fd.get('format_action_label_prescription')||'').trim()||defaultFormatActionLabels(formatSpecialty).prescription,labs:String(fd.get('format_action_label_labs')||'').trim()||defaultFormatActionLabels(formatSpecialty).labs,professional_plan:String(fd.get('format_action_label_professional_plan')||'').trim()||defaultFormatActionLabels(formatSpecialty).professional_plan};
-  if(Object.values(actionLabels).some(label=>label.length>80)){toast('Los nombres de los botones no pueden superar 80 caracteres.','warning');return false;}
-  const at=nowIso(),record={ownerUid:state.ownerUid,name:formatName,specialty:formatSpecialty,description,schema,assigned_professional_ids:[...seenAssigned],enable_prescription:fd.get('format_enable_prescription')==='on',enable_labs:enableLabs,enable_professional_plan:enableProfessionalPlan,action_labels:actionLabels,active:true,is_legacy:false,format_schema_version:2,updated_at:at};
+  const seenAssigned=[...new Set(assigned)],clinicians=new Set((state.professionals||[]).filter(p=>p.role==='clinician'&&p.active!==false).map(p=>p.id));if(seenAssigned.some(uid=>!clinicians.has(uid))){toast('Uno de los profesionales seleccionados ya no está activo. Actualiza la pantalla y vuelve a asignar.','warning');return false;}
+  const duplicate=(state.clinicalFormats||[]).find(f=>f.id!==format?.id&&String(f.name||'').trim().toLocaleLowerCase('es-MX')===formatName.toLocaleLowerCase('es-MX')&&String(f.specialty||'').trim().toLocaleLowerCase('es-MX')===formatSpecialty.toLocaleLowerCase('es-MX')&&(f.assigned_professional_ids||[]).some(uid=>seenAssigned.includes(uid)));if(duplicate){toast('Ese profesional ya tiene asignado otro formato con el mismo nombre y especialidad. Cambia el nombre para que pueda distinguirlos.','warning');return false;}
+  const enablePrescription=documentActions.some(x=>x.type==='prescription'),enableLabs=documentActions.some(x=>x.type==='labs'),enableProfessionalPlan=documentActions.some(x=>x.type==='professional_plan');
+  const actionLabels={prescription:documentActions.find(x=>x.type==='prescription')?.buttonLabel||defaultFormatActionLabels(formatSpecialty).prescription,labs:documentActions.find(x=>x.type==='labs')?.buttonLabel||defaultFormatActionLabels(formatSpecialty).labs,professional_plan:documentActions.find(x=>x.type==='professional_plan')?.buttonLabel||defaultFormatActionLabels(formatSpecialty).professional_plan};
+  const at=nowIso(),record={ownerUid:state.ownerUid,name:formatName,specialty:formatSpecialty,description,schema,assigned_professional_ids:seenAssigned,enable_prescription:enablePrescription,enable_labs:enableLabs,enable_professional_plan:enableProfessionalPlan,action_labels:actionLabels,active:true,is_legacy:false,format_schema_version:2,updated_at:at};
   const formatId=format?.id||doc(collection(db,CLINICAL_FORMATS_COLLECTION)).id;
   try{
-   if(format){await updateDoc(doc(db,CLINICAL_FORMATS_COLLECTION,formatId),record);}else await setDoc(doc(db,CLINICAL_FORMATS_COLLECTION,formatId),{...record,is_legacy:false,created_by:state.currentUser.uid,created_at:at});
+   if(format)await updateDoc(doc(db,CLINICAL_FORMATS_COLLECTION,formatId),record);else await setDoc(doc(db,CLINICAL_FORMATS_COLLECTION,formatId),{...record,created_by:state.currentUser.uid,created_at:at});
    const actionSettings=normalizeDocumentActionSettings(state.documentActionSettings),nextFormats={...actionSettings.formats};nextFormats[formatId]=documentActions;
-   try{await saveDocumentActionSettings({...actionSettings,formats:nextFormats});}
-   catch(configErr){console.error('Formato guardado, pero sus acciones personalizadas no se sincronizaron.',configErr);toast(`El formato se guardó, pero no se guardaron los documentos personalizados: ${friendlyError(configErr)}. Vuelve a editarlo y guarda nuevamente.`,'warning',11000);return true;}
+   try{await saveDocumentActionSettings({...actionSettings,formats:nextFormats},{explicitFormatIds:[formatId]});}catch(configErr){console.error('Formato guardado, pero sus generadores no se sincronizaron.',configErr);toast(`El formato se guardó, pero no se guardaron sus generadores: ${friendlyError(configErr)}. Vuelve a editarlo y guarda nuevamente.`,'warning',11000);return true;}
    await writeAudit(format?'ACTUALIZAR_FORMATO_CLINICO':'CREAR_FORMATO_CLINICO','',formatId);toast(format?'Formato actualizado.':'Formato creado desde cero.');await renderTemplates();return true;
   }catch(err){console.error(err);toast('No se pudo guardar el formato. '+friendlyError(err),'error',9000);return false;}
  }});
@@ -1845,6 +1840,7 @@ async function deleteClinicalFormat(formatId){
   const dependentDrafts=draftsSnap.docs.filter(d=>String(d.data()?.payload?.format_id||'')===format.id);
   if(dependentDrafts.length){toast(`No se puede eliminar “${format.name}” todavía: ${dependentDrafts.length} borrador(es) guardado(s) dependen de él. Finaliza esos documentos o cámbialos a otro formato antes de eliminar la plantilla.`,'warning',11000);return;}
   await deleteDoc(doc(db,CLINICAL_FORMATS_COLLECTION,format.id));
+  state.clinicalFormats=(state.clinicalFormats||[]).filter(item=>item.id!==format.id);
   const actionSettings=normalizeDocumentActionSettings(state.documentActionSettings),nextFormats={...actionSettings.formats};
   if(Object.prototype.hasOwnProperty.call(nextFormats,format.id)){delete nextFormats[format.id];try{await saveDocumentActionSettings({...actionSettings,formats:nextFormats});}catch(cleanErr){console.warn('El formato se eliminó, pero no se pudo limpiar su asignación de documentos reutilizables.',cleanErr);toast('El formato se eliminó, pero quedó una asignación huérfana en el catálogo. Puedes retirarla al editar la configuración.','warning',9000);}}
   await writeAudit('ELIMINAR_FORMATO_CLINICO','',format.id);toast(`Formato “${format.name}” eliminado. Los expedientes y documentos finalizados se conservaron.`);await renderTemplates();
@@ -1869,7 +1865,7 @@ async function renderCustomization(){
 function templateBuilderOptionText(options){return (options||[]).map(o=>`${o.icon||'🔹'}|${o.label||''}`).join('\n');}
 function templateBuilderRow(field,index,showDestinations=false){
  const types=[['textarea','Texto amplio'],['text','Texto corto'],['number','Número'],['date','Fecha'],['choice','Botones · elegir uno'],['chips','Botones · elegir varios'],['scale','Escala numérica'],['foodfreq','Frecuencia por alimento (0 a 7 / semana)'],['foodplan','Plan alimentario · tabla de seis opciones']];
- return `<section class="template-builder-row" data-schema-row><div class="template-builder-row-head"><strong>Campo ${index+1}</strong><div class="template-builder-row-actions"><button type="button" class="btn small" data-schema-up title="Subir">↑</button><button type="button" class="btn small" data-schema-down title="Bajar">↓</button><button type="button" class="btn small danger" data-schema-remove>Eliminar</button></div></div><div class="form-grid two"><label class="form-field"><span>Clave técnica (no modificar)</span><input name="schema_key" value="${esc(field.key)}" readonly></label><label class="form-field"><span>Nombre del campo *</span><input name="schema_label" value="${esc(field.label)}" required maxlength="120"></label><label class="form-field"><span>Grupo / sección</span><input name="schema_group" value="${esc(field.group||'Historia clínica')}" maxlength="100"></label><label class="form-field"><span>Tipo de respuesta</span><select name="schema_type">${types.map(([v,l])=>`<option value="${v}" ${field.type===v?'selected':''}>${l}</option>`).join('')}</select></label><label class="form-field"><span>Icono del campo</span><input name="schema_icon" value="${esc(field.icon||'📝')}" maxlength="8" placeholder="🩺"></label><label class="form-field"><span>Texto de ayuda / ejemplo</span><input name="schema_placeholder" value="${esc(field.placeholder||'')}" maxlength="220"></label><label class="form-field"><span>Valor mínimo (para escalas)</span><input name="schema_min" type="number" step="any" value="${Number.isFinite(Number(field.min))?field.min:0}"></label><label class="form-field"><span>Valor máximo (para escalas)</span><input name="schema_max" type="number" step="any" value="${Number.isFinite(Number(field.max))?field.max:10}"></label><label class="form-field span-2"><span>Opciones de botones (solo para elegir uno o varios)</span><textarea name="schema_options" rows="3" placeholder="🩸|Diabetes&#10;❤️|Hipertensión">${esc(templateBuilderOptionText(field.options))}</textarea><small class="hint">Una opción por línea. Formato: emoji|texto. Ejemplo: 🩸|Diabetes. Se muestran como botones gráficos.</small></label><label class="check-label span-2"><input type="checkbox" data-schema-required ${field.required?'checked':''}> Campo obligatorio para generar este formato</label><input type="hidden" name="schema_required" value="${field.required?'1':'0'}"><label class="check-label span-2"><input type="checkbox" data-schema-plan-include ${field.include_in_professional_plan?'checked':''}> Incluir este campo al generar el plan profesional (si el formato tiene esa acción)</label><input type="hidden" name="schema_include_plan" value="${field.include_in_professional_plan?'1':'0'}">${showDestinations?`<div class="form-field span-2"><strong>Usar también este campo en documentos secundarios</strong><label class="check-label"><input type="checkbox" data-schema-labs-summary ${field.include_in_labs_summary||field.document_destinations?.includes('labs_summary')?'checked':''}> Incluir en el resumen clínico de la orden de laboratorios</label><input type="hidden" name="schema_include_labs_summary" value="${field.include_in_labs_summary||field.document_destinations?.includes('labs_summary')?'1':'0'}"><label class="check-label"><input type="checkbox" data-schema-prescription ${field.include_in_prescription||field.document_destinations?.includes('prescription')?'checked':''}> Incluir en la receta / documento de prescripción</label><input type="hidden" name="schema_include_prescription" value="${field.include_in_prescription||field.document_destinations?.includes('prescription')?'1':'0'}"></div>`:''}</div></section>`;
+ return `<section class="template-builder-row" data-schema-row><div class="template-builder-row-head"><strong>Campo ${index+1}</strong><div class="template-builder-row-actions"><button type="button" class="btn small" data-schema-up title="Subir">↑</button><button type="button" class="btn small" data-schema-down title="Bajar">↓</button><button type="button" class="btn small danger" data-schema-remove>Eliminar</button></div></div><div class="form-grid two"><label class="form-field"><span>Clave técnica (no modificar)</span><input name="schema_key" value="${esc(field.key)}" readonly></label><label class="form-field"><span>Nombre del campo *</span><input name="schema_label" value="${esc(field.label)}" required maxlength="120"></label><label class="form-field"><span>Grupo / sección</span><input name="schema_group" value="${esc(field.group||'Historia clínica')}" maxlength="100"></label><label class="form-field"><span>Tipo de respuesta</span><select name="schema_type">${types.map(([v,l])=>`<option value="${v}" ${field.type===v?'selected':''}>${l}</option>`).join('')}</select></label><label class="form-field"><span>Icono del campo</span><input name="schema_icon" value="${esc(field.icon||'📝')}" maxlength="8" placeholder="🩺"></label><label class="form-field"><span>Texto de ayuda / ejemplo</span><input name="schema_placeholder" value="${esc(field.placeholder||'')}" maxlength="220"></label><label class="form-field"><span>Valor mínimo (para escalas)</span><input name="schema_min" type="number" step="any" value="${Number.isFinite(Number(field.min))?field.min:0}"></label><label class="form-field"><span>Valor máximo (para escalas)</span><input name="schema_max" type="number" step="any" value="${Number.isFinite(Number(field.max))?field.max:10}"></label><label class="form-field span-2"><span>Opciones de botones (solo para elegir uno o varios)</span><textarea name="schema_options" rows="3" placeholder="🩸|Diabetes&#10;❤️|Hipertensión">${esc(templateBuilderOptionText(field.options))}</textarea><small class="hint">Una opción por línea. Formato: emoji|texto. Ejemplo: 🩸|Diabetes. Se muestran como botones gráficos.</small></label><label class="check-label span-2"><input type="checkbox" data-schema-required ${field.required?'checked':''}> Campo obligatorio para generar este formato</label><input type="hidden" name="schema_required" value="${field.required?'1':'0'}"><input type="hidden" name="schema_include_plan" value="${field.include_in_professional_plan?'1':'0'}"><input type="hidden" name="schema_include_labs_summary" value="${field.include_in_labs_summary||field.document_destinations?.includes('labs_summary')?'1':'0'}"><input type="hidden" name="schema_include_prescription" value="${field.include_in_prescription||field.document_destinations?.includes('prescription')?'1':'0'}"></div></section>`;
 }
 function openTemplateLabelsModal(initialSpecialty='Fisioterapia'){
  if(state.user?.role!=='admin'){toast('Solo administración puede modificar formatos clínicos.','warning');return;}
