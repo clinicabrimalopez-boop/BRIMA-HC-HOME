@@ -383,3 +383,40 @@ body[data-brima-specialty="psicologia"] .sidebar{background:linear-gradient(180d
  .document-catalog-row{align-items:flex-start;flex-direction:column}
  .document-action-include-options{display:grid;grid-template-columns:1fr}
 }
+
+/* BRIMA 0.3.17 · PARCHE 7 · Aviso de interfaz disponible sin conexión */
+.brima-offline-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 16px;
+  color: #744b08;
+  background: #fff5dc;
+  border-bottom: 1px solid #f0d79d;
+  font: 600 13px/1.45 "DM Sans", Arial, sans-serif;
+  text-align: center;
+}
+.brima-offline-banner[hidden] { display: none !important; }
+.brima-offline-banner.is-restored {
+  color: #175c45;
+  background: #eaf7f0;
+  border-bottom-color: #b9e1cb;
+}
+.brima-offline-banner button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+@media (max-width: 600px) {
+  .brima-offline-banner { align-items: flex-start; flex-direction: column; gap: 7px; text-align: left; }
+}
