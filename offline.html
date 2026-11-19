@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es-MX">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10253f">
+  <title>BRIMA HC HOME · Sin conexión</title>
+  <style>
+    :root{font-family:"DM Sans",Arial,sans-serif;color:#24364b;background:#f3f6fa}
+    *{box-sizing:border-box}
+    body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px}
+    main{width:min(560px,100%);background:#fff;border:1px solid #dce5ee;border-radius:22px;padding:32px;box-shadow:0 18px 55px #18304b1a;text-align:center}
+    .mark{width:58px;height:58px;margin:0 auto 16px;border-radius:17px;display:grid;place-items:center;background:#55adf6;color:#fff;font-size:32px;font-weight:800}
+    h1{font-size:24px;margin:0 0 10px}p{line-height:1.6;color:#64748b;margin:10px 0}
+    .status{display:inline-flex;gap:8px;align-items:center;padding:8px 12px;background:#fff5dc;color:#80550c;border-radius:999px;font-size:13px;font-weight:700;margin:10px 0 16px}
+    button{margin-top:12px;border:0;border-radius:10px;padding:12px 18px;background:#2463a6;color:#fff;font:600 14px inherit;cursor:pointer}
+    small{display:block;margin-top:18px;color:#8392a6;line-height:1.5}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">B</div>
+    <h1>BRIMA HC HOME</h1>
+    <div class="status">● Interfaz sin conexión</div>
+    <p>La interfaz de BRIMA se conserva en este dispositivo, pero no hay conexión a Internet en este momento.</p>
+    <p>Iniciar sesión, consultar pacientes, sincronizar expedientes y guardar información requieren conexión con Firebase.</p>
+    <button type="button" onclick="location.reload()">Volver a intentar</button>
+    <small>Esta pantalla no guarda ni muestra datos clínicos. Al recuperar la conexión, vuelve a abrir BRIMA.</small>
+  </main>
+</body>
+</html>
