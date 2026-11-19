@@ -4,7 +4,7 @@
  * Se cachean archivos locales y módulos JS estáticos del Firebase SDK.
  * NUNCA se cachean Firestore, Authentication, pacientes, consultas, tokens ni respuestas clínicas.
  */
-const CACHE_NAME = 'brima-shell-v0317-parche7-offline-ui-20261111';
+const CACHE_NAME = 'brima-shell-v0317-parche7-offline-ui-202611112222';
 const FIREBASE_SDK_CACHE = 'brima-firebase-sdk-v12-19-0';
 const FIREBASE_SDK_ORIGIN = 'https://www.gstatic.com';
 const FIREBASE_SDK_PREFIX = '/firebasejs/12.19.0/';
