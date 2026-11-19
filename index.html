@@ -20,6 +20,88 @@
   <script type="module" src="./js/app.js"></script>
 </head>
 <body>
+  <div id="brima-offline-banner" class="brima-offline-banner" role="status" aria-live="polite" hidden>
+    <span id="brima-offline-message">Modo sin conexión: se muestra la interfaz guardada. El acceso, la consulta y el guardado requieren Internet.</span>
+    <button id="brima-offline-reload" type="button" hidden>Recargar</button>
+  </div>
+  <script>
+    // Respaldo independiente del módulo Firebase: permite mostrar la interfaz
+    // almacenada aunque el SDK no logre inicializarse sin conexión.
+    (() => {
+      const bannerId = 'brima-offline-banner';
+      const messageId = 'brima-offline-message';
+      const reloadId = 'brima-offline-reload';
+      let offlineFallbackShown = false;
+      const byId = id => document.getElementById(id);
+      function setOfflineState() {
+        const banner = byId(bannerId);
+        const message = byId(messageId);
+        const reload = byId(reloadId);
+        if (!banner || !message || !reload) return;
+        if (!navigator.onLine) {
+          banner.hidden = false;
+          banner.classList.remove('is-restored');
+          message.textContent = 'Modo sin conexión: BRIMA está mostrando la interfaz guardada. Iniciar sesión, consultar pacientes y guardar información requieren Internet.';
+          reload.hidden = true;
+          document.documentElement.classList.add('brima-offline-mode');
+        } else if (document.documentElement.classList.contains('brima-offline-mode')) {
+          banner.hidden = false;
+          banner.classList.add('is-restored');
+          message.textContent = 'Conexión restaurada. Recarga BRIMA para activar el acceso y las funciones.';
+          reload.hidden = false;
+        } else {
+          banner.hidden = true;
+          document.documentElement.classList.remove('brima-offline-mode');
+        }
+      }
+      document.addEventListener('DOMContentLoaded', () => {
+        const reload = byId(reloadId);
+        if (reload) reload.addEventListener('click', () => window.location.reload());
+      }, { once: true });
+      function showCachedInterfaceFallback() {
+        if (navigator.onLine || offlineFallbackShown) return;
+        const loading = byId('loading-screen');
+        const auth = byId('auth-screen');
+        const loginMessage = byId('login-message');
+        const appShell = byId('app-shell');
+        if (loading && !loading.classList.contains('hidden') && (!appShell || appShell.classList.contains('hidden'))) {
+          offlineFallbackShown = true;
+          loading.classList.add('hidden');
+          if (auth) auth.classList.remove('hidden');
+          if (loginMessage) loginMessage.textContent = 'Interfaz disponible sin conexión. Para iniciar sesión y utilizar BRIMA, conecta el equipo a Internet y recarga.';
+        }
+      }
+      // En modo offline no se permite enviar formularios ni ejecutar acciones
+      // que aparenten guardar o sincronizar datos. No se almacena información clínica.
+      document.addEventListener('submit', event => {
+        if (navigator.onLine) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const loginMessage = byId('login-message');
+        if (loginMessage) loginMessage.textContent = 'Sin conexión: el acceso y el guardado requieren Internet. Tus datos no se han enviado.';
+      }, true);
+      document.addEventListener('click', event => {
+        if (navigator.onLine) return;
+        const reload = event.target && event.target.closest ? event.target.closest('#' + reloadId) : null;
+        if (reload) { window.location.reload(); return; }
+        const action = event.target && event.target.closest ? event.target.closest('#app-shell button, #auth-screen button, #bootstrap-screen button') : null;
+        if (!action) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const loginMessage = byId('login-message');
+        if (loginMessage) loginMessage.textContent = 'Esta es la interfaz guardada de BRIMA. Conéctate a Internet para utilizar esta acción.';
+      }, true);
+      window.addEventListener('online', setOfflineState);
+      window.addEventListener('offline', () => { setOfflineState(); showCachedInterfaceFallback(); });
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setOfflineState, { once: true });
+      else setOfflineState();
+      if (!navigator.onLine) {
+        setTimeout(showCachedInterfaceFallback, 1800);
+        setTimeout(showCachedInterfaceFallback, 4500);
+      }
+      window.addEventListener('load', () => { if (!navigator.onLine) showCachedInterfaceFallback(); });
+    })();
+  </script>
   <div id="loading-screen" class="loading-screen"><div class="brand-mark large">B</div><p>Preparando BRIMA HC HOME…</p><span class="spinner"></span></div>
 
   <main id="auth-screen" class="auth-shell hidden">
